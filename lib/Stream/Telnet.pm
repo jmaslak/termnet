@@ -241,7 +241,7 @@ sub get($self) {
     my $data = $self->read_buffer . $self->readsub->();
     $self->read_buffer('');
 
-    if ($data eq '') { return '' }
+    if ( $data eq '' ) { return '' }
 
     # Handle Telnet Commands
     my $parsed = '';
@@ -270,7 +270,7 @@ sub get($self) {
         if ( ord($cmd) == 255 ) {
             $parsed .= chr(255);
         } elsif ( ( ord($cmd) >= 251 ) && ( ord($cmd) <= 254 ) ) {
-            if (length($payload) < 1) {
+            if ( length($payload) < 1 ) {
                 # We don't have enough data
                 $self->read_buffer($part2);
                 last;
@@ -324,15 +324,15 @@ sub ack_if_needed ( $self, $opt, $response ) {
 
     # Send do/don't
     if ( $response eq 'DO' ) {
-        if (exists($self->pending_do->{$optname})) {
-            delete($self->pending_do->{$optname});
+        if ( exists( $self->pending_do->{$optname} ) ) {
+            delete( $self->pending_do->{$optname} );
         } else {
             $self->send_do($opt);
         }
         return undef;
     } elsif ( $response eq 'DONT' ) {
-        if (exists($self->pending_do->{$optname})) {
-            delete($self->pending_do->{$optname});
+        if ( exists( $self->pending_do->{$optname} ) ) {
+            delete( $self->pending_do->{$optname} );
         } else {
             $self->send_dont($opt);
         }
@@ -347,7 +347,7 @@ sub ack_if_needed ( $self, $opt, $response ) {
         if ( !keys( $self->pending_will->%* ) ) {
             my $data = $self->write_buffer;
             $self->write_buffer('');
-            if ($data ne '') { $self->put($data) }
+            if ( $data ne '' ) { $self->put($data) }
         }
         return undef;
     }
