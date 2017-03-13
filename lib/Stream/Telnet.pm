@@ -12,12 +12,12 @@ use Termnet::Boilerplate 'class';
 
 =head1 SYNOPSIS
 
-    my $tn = Stream::Telnet->new(
+    my $tn = Stream::Telnet->new();
         readsub  => sub { return <STDIN> },
         writesub => sub($data} { print $data },
     );
 
-    tn->get();
+    my $received_data = tn->get();
     tn->put('foo');
 
 =cut
@@ -199,7 +199,7 @@ sub init_negotiate($self) {
     $self->send_will( chr(3) );    # Send WILL SUPPRESS-GO-AHEAD
 
     $self->send_do( chr(0) );      # Send DO BINARY
-    $self->send_do( chr(1) );      # Send DO GO AHEAD
+    $self->send_dont( chr(1) );    # Send DO GO AHEAD
     $self->send_do( chr(3) );      # Send DO SUPPRESS-GO-AHEAD
 }
 
@@ -324,7 +324,6 @@ sub ack_if_needed ( $self, $opt, $response ) {
 
     # Send do/don't
     if ( $response eq 'DO' ) {
-        say "HERE\n";
         if (exists($self->pending_do->{$optname})) {
             delete($self->pending_do->{$optname});
         } else {

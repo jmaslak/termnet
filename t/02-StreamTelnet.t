@@ -41,7 +41,7 @@ sub basic_api() {
           . "\xff\xfb\x01"     # WILL ECHO
           . "\xff\xfb\x03"     # WILL SUPPRESS-GO-AHEAD
           . "\xff\xfd\x00"     # DO BINARY
-          . "\xff\xfd\x01"     # DO ECHO
+          . "\xff\xfe\x01"     # DONT ECHO
           . "\xff\xfd\x03"     # DO SUPPRESS-GO-AHEAD
     );
     my $sent;
