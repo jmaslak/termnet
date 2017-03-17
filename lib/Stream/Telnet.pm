@@ -290,12 +290,12 @@ sub get($self) {
                 warn( "Unknown option code: " . ord($opt) );
             }
         } elsif ( ord($cmd) == 249 ) {
-            ### CMD: 'GA (go ahead)'
+            #### CMD: 'GA (go ahead)'
         } elsif ( ord($cmd) == 244 ) {
-            ### CMD: 'IP (interrupt process)'
+            #### CMD: 'IP (interrupt process)'
             $parsed .= $self->char_interrupt();
         } elsif ( ord($cmd) == 241 ) {
-            ### CMD: 'NOP'
+            #### CMD: 'NOP'
             # Do nothing
         } else {
             warn( "Unknown command code: " . ord($cmd) );
@@ -371,7 +371,7 @@ Process an incoming C<WILL> C<$opt> option.
 =cut
 
 sub handle_will ( $self, $opt ) {
-    ### CMD: 'WILL ' . $self->get_opt_name($opt)
+    #### CMD: 'WILL ' . $self->get_opt_name($opt)
     my $optname  = $self->get_opt_name($opt);
     my $response = 'DONT';                      # Default
 
@@ -399,7 +399,7 @@ Process an incoming C<WONT> C<$opt> option.
 =cut
 
 sub handle_wont ( $self, $opt ) {
-    ### CMD: 'WONT ' . $self->get_opt_name($opt)
+    #### CMD: 'WONT ' . $self->get_opt_name($opt)
     my $optname  = $self->get_opt_name($opt);
     my $response = 'DONT';
 
@@ -426,7 +426,7 @@ Process an incoming C<DO> C<$opt> option.
 =cut
 
 sub handle_do ( $self, $opt ) {
-    ### CMD: 'DO ' . $self->get_opt_name($opt)
+    #### CMD: 'DO ' . $self->get_opt_name($opt)
     my $optname  = $self->get_opt_name($opt);
     my $response = 'WONT';
 
@@ -456,7 +456,7 @@ Process an incoming C<DONT> C<$opt> option.
 =cut
 
 sub handle_dont ( $self, $opt ) {
-    ### CMD: 'DONT ' . $self->get_opt_name($opt)
+    #### CMD: 'DONT ' . $self->get_opt_name($opt)
     my $optname  = $self->get_opt_name($opt);
     my $response = 'WONT';
 
@@ -501,7 +501,7 @@ Sends a C<WILL> comamnd to the other side.
 =cut
 
 sub send_will ( $self, $opt ) {
-    ### SEND: 'WILL ' . $self->get_opt_name($opt)
+    #### SEND: 'WILL ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(251) . $opt );
 }
 
@@ -514,7 +514,7 @@ Sends a C<WONT> comamnd to the other side.
 =cut
 
 sub send_wont ( $self, $opt ) {
-    ### SEND: 'WONT ' . $self->get_opt_name($opt)
+    #### SEND: 'WONT ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(252) . $opt );
 }
 
@@ -527,7 +527,7 @@ Sends a C<DO> comamnd to the other side.
 =cut
 
 sub send_do ( $self, $opt ) {
-    ### SEND: 'DO ' . $self->get_opt_name($opt)
+    #### SEND: 'DO ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(253) . $opt );
 }
 
@@ -540,7 +540,7 @@ Sends a C<DONT> comamnd to the other side.
 =cut
 
 sub send_dont ( $self, $opt ) {
-    ### SEND: 'DONT ' . $self->get_opt_name($opt)
+    #### SEND: 'DONT ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(254) . $opt );
 }
 

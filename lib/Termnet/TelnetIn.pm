@@ -9,158 +9,93 @@ package Termnet::TelnetIn;
 
 use Termnet::Boilerplate 'class';
 
-use AnyEvent;
-use AnyEvent::Handle;
-use AnyEvent::Socket;
 use Stream::Telnet;
 
-has fh => (
-    is => 'ro',
-    required => 1,
-);
-
-has handle => (
-    is => 'ro',
-    isa => 'AnyEvent::Handle',
-    required => 1,
-    lazy => 1,
-    init_arg => '_handle',
-    builder => '_build_handle',
-);
-
-sub _build_handle($self) {
-    AnyEvent::Socket::tcp_nodelay($self->fh, 1);
-
-    my $handle = AnyEvent::Handle->new(
-        fh => $self->fh,
-        on_error => sub($h, $fatal, $error) {
-            $self->disconnect_peer();
-            $self->handle->destroy();
-        },
-        on_eof => sub($h) {
-            $self->disconnect_peer();
-            $self->handle->destroy();
-
-            if (defined($self->eof_cb)) {
-                $self->eof_cb->($self);
-            }
-        },
-        on_read => sub($h) {
-            my $data = $self->get();
-            $self->peer_put($data);
-        }
-    );
-
-    return $handle;
-}
+with 'Termnet::Lower', 'Termnet::UpperSingleChild';
 
 has telnet => (
-    is => 'ro',
-    isa => 'Stream::Telnet',
+    is       => 'ro',
+    isa      => 'Stream::Telnet',
     required => 1,
     init_arg => '_telnet',
-    builder => '_build_telnet',
+    builder  => '_build_telnet',
 );
 
 sub _build_telnet($self) {
     my $telnet = Stream::Telnet->new(
-        readsub  => sub()      { $self->get_raw(); },
-        writesub => sub($data) { $self->put_raw($data); },
+        readsub => sub() {
+            my $d = $self->input_buffer;
+            $self->input_buffer(undef);
+            return $d;
+        },
+        writesub => sub($data) {
+            if (defined($self->lower)) {
+                $self->lower->accept_input_from_upper( $self, $data );
+            }
+        },
     );
-
-    $telnet->init_negotiate();
 
     return $telnet;
 }
 
+has input_buffer => (
+    is  => 'rw',
+    isa => 'Maybe[Str]',
+);
+
 has type => (
-    is => 'ro',
-    isa => 'Str',
+    is       => 'ro',
+    isa      => 'Str',
     required => 1,
     init_arg => '_type',
-    default => 'serial',
+    default  => 'telnet',
 );
 
 has pending_events => (
-    is => 'ro',
-    isa => 'Str',
+    is       => 'ro',
+    isa      => 'Str',
     required => 1,
     init_arg => '_pending',
-    default => sub { return {} },
-    lazy => 1,
-);
-
-has peer => (
-    is => 'rw',
-);
-
-has disconnect_peer_cb => (
-    is => 'rw',
-    isa => 'Maybe[CodeRef]',
+    default  => sub { return {} },
+    lazy     => 1,
 );
 
 has eof_cb => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Maybe[CodeRef]',
 );
 
-sub get($self) {
-    return $self->telnet->get();
+sub accept_input_from_lower ( $self, $lower, $data ) {
+    $self->input_buffer($data);
+    my $cleandata = $self->telnet->get();
+
+    if ( $cleandata ne '' ) {
+        $self->upper->accept_input_from_lower( $self, $cleandata );
+    }
 }
 
-sub put($self, $data) {
+sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
+    if ( !defined( $self->upper ) ) { return; }
+
+    return $self->upper->accept_command_from_lower( $self, $cmd, @data );
+}
+
+sub accept_input_from_upper ( $self, $upper, $data ) {
     $self->telnet->put($data);
 }
 
-sub get_raw($self) {
-    my $data = $self->handle->rbuf;
-    $self->handle->rbuf = '';
+sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
+    $self->lower->accept_command_from_upper( $self, $cmd, @data );
 
-    return $data;
-}
-
-sub put_raw($self, $data) {
-    $self->handle->push_write($data);
-}
-
-sub peer_put($self, $data) {
-    my $peer = $self->peer();
-
-    if (defined($peer)) {
-        $peer->put($data);
+    if ( $cmd eq 'DISCONNECT SESSION' ) {
+        $self->upper(undef);
+        $self->lower(undef);
     }
 }
 
-sub connect_peer($self, $peer) {
-    if (defined($self->peer)) {
-        $self->disconnect_peer();
-    }
-
-    $self->peer($peer);
-
-    if (!defined($peer->peer)) {
-        $peer->connect_peer($self);
-    }
-}
-
-sub disconnect_peer($self) {
-    my $peer = $self->peer;
-    if (!defined($peer)) { return; }
-
-    $self->peer(undef);
-
-    if (defined($peer->peer)) {
-        $peer->disconnect_peer();
-    }
-
-    if (defined($self->disconnect_peer_cb)) {
-        $self->disconnect_peer_cb->($self);
-    }
-}
-
-sub is_connected($self) {
-    return defined($self->peer);
-}
+after 'register_lower' => sub ( $self, $lower ) {
+    $self->telnet->init_negotiate();
+};
 
 __PACKAGE__->meta->make_immutable;
 
