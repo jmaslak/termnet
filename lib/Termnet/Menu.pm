@@ -12,6 +12,8 @@ use List::Util qw(max);
 
 with 'Termnet::Lower', 'Termnet::UpperSingleChild';
 
+my (@possibilities) = qw(activity connect exit list);
+
 has input_buffer => (
     is       => 'rw',
     isa      => 'Str',
@@ -32,6 +34,13 @@ has mode => (
     isa      => 'Str',
     required => 1,
     default  => 'menu',
+);
+
+has escape_time => (
+    is => 'rw',
+    isa => 'Num',
+    required => 1,
+    default => 1.0,
 );
 
 has recv_nl => (
@@ -60,6 +69,13 @@ has recv_ansi_del => (
     isa      => 'Str',
     required => 1,
     default  => "\x1B[3~",
+);
+
+has recv_tab => (
+    is => 'rw',
+    isa => 'Str',
+    required => 1,
+    default => "\t",
 );
 
 has send_nl => (
@@ -154,110 +170,139 @@ has term_prompt => (
 );
 
 sub accept_input_from_lower ( $self, $lower, $data ) {
-    my $snl = $self->send_nl;
-    my $rnl = $self->recv_nl;
+    if ($data eq '') { return; }
 
+    if ($self->mode eq 'connected') {
+        $self->accept_input_connected_mode($lower, $data);
+    } elsif ($self->mode eq 'menu') {
+        $self->accept_input_menu_mode($lower, $data);
+    } else {
+        die("unknown mode: " . $self->mode);
+    }
+}
+
+sub accept_input_connected_mode($self, $lower, $data) {
+    if (defined($self->upper)) {
+        $self->upper->accept_input_from_lower($self, $data);
+    }
+}
+
+sub accept_input_menu_mode($self, $lower, $data) {
+
+    # Shorter versions of common variables
     my $rbs  = $self->recv_bs;
     my $rdel = $self->recv_del;
+    my $rnl  = $self->recv_nl;
+    my $rtab = $self->recv_tab;
     my $sbs  = $self->send_bs;
+    my $snl  = $self->send_nl;
 
-    if ( $self->mode eq 'connected' ) {
-        if (defined($self->upper)) {
-            $self->upper->accept_input_from_lower($self, $data);
-        }
-        return;
-    }
+    $data =~ s/${rnl}/\n/gs;
 
-    if ( $self->mode eq 'menu' ) {
+    my $out = ''; # what we send out
 
-        my $out = '';
-        if ( ( $data =~ m/${rbs}/s ) || ( $data =~ m/${rdel}/s ) ) {
-            # Handle Backspace
+    my $line = $self->input_buffer();  # Current line being input
+    $self->input_buffer('');
 
-            my $ib = $self->input_buffer();
-            $self->input_buffer('');
+    my (@chars) = split '', $data;
+    while (length($data) > 0) {
+        my $c;
+        ($c, $data) = $data =~ m/^(.)(.*)$/s;
 
-            my $buffer = '';
+        if ( $c eq "\n" ) {
+            # Handle newline
 
-            my (@chars) = split '', $ib;
-            foreach my $c (@chars) {
-                if ( $c eq "\n" ) {
-                    $self->input_buffer( $self->input_buffer() . $buffer . $c );
-                    $buffer = '';
-                } else {
-                    $buffer .= $c;
-                }
+            # Output line
+            $out .= $snl;
+            $lower->accept_input_from_upper( $self, $out );
+            $out = '';
+
+            # Do command
+            $self->do_command_line($line);
+            $line = '';
+
+            # Do we need to prompt?
+            if ($self->mode eq 'menu') {
+                $self->send_prompt();
+            } else {
+                $self->input_buffer($data);
+                $self->accept_input_from_lower( $lower, $data ); # Process command line
+                return; # We aren't in menu mode, so we return here.
             }
 
-            $data =~ s/${rnl}/\n/gs;
-            @chars = split '', $data;
-            foreach my $c (@chars) {
-                if ( $c eq "\n" ) {
-                    $self->input_buffer( $self->input_buffer() . $buffer . $rnl );
-                    $buffer = '';
+        } elsif ( $c eq $rtab ) {
+            if ($line =~ m/\s/s) {
+                # Only valid on first param (the command)
+                $out .= $self->send_bell();
+            } else {
+                my (@choices) = $self->completions($line);
+                if (scalar(@choices) == 0) {
+                    $out .= $self->send_bell();
+                } elsif (scalar(@choices) == 1) {
+                    my $comp = $choices[0];
+                    my $l = fc($line);
+                    $comp =~ s/^${l}//s;
+
+                    $out .= $comp . ' ';
+                    $line .= $comp . ' ';
+                } else {
                     $out .= $snl;
-                } elsif ( ( $c eq $rbs ) || ( $c eq $rdel ) ) {
-                    if ( length($buffer) > 0 ) {
-                        $buffer =~ s/.$//s;
-                        $out .= $sbs;
-                    } else {
-                        $out .= $self->send_bell();
+                    $self->lower->accept_input_from_upper($self, $out);
+                    $out = '';
+
+                    foreach my $c (@choices) {
+                        $self->send_status("    $c");
                     }
-                } else {
-                    $buffer .= $c;
-                    $out    .= $c;
+                    $self->send_prompt();
+                    $self->lower->accept_input_from_upper($self, $line);
                 }
             }
-
-            $data = $buffer;
-
+        } elsif ( ( $c eq $rbs ) || ( $c eq $rdel ) ) {
+            # Handle backspace
+            
+            if ( length($line) > 0 ) {
+                $line =~ s/.$//s;
+                $out .= $sbs;
+            } else {
+                # We are at start of line
+                $out .= $self->send_bell();
+            }
         } else {
-            $out = $data;
-            $out =~ s/${rnl}/${snl}/gs;
-            $data =~ s/${rnl}/\n/gs;
-        }
+            # All other characters
 
-        # Do Echo
-        $lower->accept_input_from_upper( $self, $out );
+            $line .= $c;
+            $out  .= $c;
+        }
     }
 
-    while ( ( $self->input_buffer() . $data ) ne '' ) {
-        $data = $self->input_buffer() . $data;
-        $self->input_buffer('');
+    $self->input_buffer($line);
+    if ($out ne '') {
+        $lower->accept_input_from_upper( $self, $out ); # Echo to client
+    }
+}
 
-        if ( $data !~ m/\n/s ) {
-            $self->input_buffer($data);
-            return;
-        }
+sub do_command_line($self, $line) {
+    # Handle a command line
 
-        my ( $current, $next ) = $data =~ m/^([^\n]*)\n(.*)$/;
+    # Trim front and back of line
+    $line =~ s/^\s+//s;
+    $line =~ s/\s+$//s;
 
-        $self->input_buffer($next // '');
-        $data = $self->input_buffer;
+    my (@parts) = split /\s+/, $line;
+    my $cmd = fc( shift(@parts) // '' );
 
-        $current =~ s/^\s+//s;
-        $current =~ s/\s+$//s;
-
-        my (@parts) = split /\s+/, $current;
-        my $cmd = fc( shift(@parts) // '' );
-
-        if ( $cmd eq 'activity' ) {
-            $self->do_activity( \@parts );
-        } elsif ( ( $cmd eq 'c' ) || ( $cmd eq 'connect' ) ) {
-            $self->do_connect( \@parts );
-        } elsif ( $cmd eq 'exit' ) {
-            $self->do_exit( \@parts );
-        } elsif ( $cmd eq 'list' ) {
-            $self->do_list( \@parts );
-        } elsif ( $cmd eq '' ) {
-            # Do nothing
-        } else {
-            $self->send_error("Invalid command!");
-        }
-
-        if ($self->mode eq 'menu') {
-            $self->send_prompt();
-        }
+    if ( $cmd eq 'activity' ) {
+        $self->do_activity( \@parts );
+    } elsif ( ( $cmd eq 'c' ) || ( $cmd eq 'connect' ) ) {
+        $self->do_connect( \@parts );
+    } elsif ( $cmd eq 'exit' ) {
+        $self->do_exit( \@parts );
+    } elsif ( $cmd eq 'list' ) {
+        $self->do_list( \@parts );
+    } elsif ( $cmd eq '' ) {
+        # Do nothing
+    } else {
+        $self->send_error("Invalid command!");
     }
 }
 
@@ -418,6 +463,19 @@ sub send_error ( $self, $error ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_error . $error . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+}
+
+sub completions($self, $line) {
+    if ($line eq '') { return map { fc($_) } @possibilities; }
+    my $l = fc($line);
+
+    my @out;
+    foreach my $c (sort map { fc($_) } @possibilities) {
+        if ($c =~ m/^${l}/s) {
+            push @out, $c;
+        }
+    }
+    return @out;
 }
 
 __PACKAGE__->meta->make_immutable;

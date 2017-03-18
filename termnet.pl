@@ -41,6 +41,22 @@ MAIN: {
     $matrix->register_lower($serial);
     $matrix->register_name($serial, 'gps');
 
+    $serial = Termnet::Serial->new(
+        port => '/dev/ttyUSB1',
+        baud => 9600,
+        id => 'serial:wlc',
+    );
+    $matrix->register_lower($serial);
+    $matrix->register_name($serial, 'wlc');
+
+    $serial = Termnet::Serial->new(
+        port => '/dev/ttyUSB2',
+        baud => 9600,
+        id => 'serial:sw02fpc0',
+    );
+    $matrix->register_lower($serial);
+    $matrix->register_name($serial, 'sw02fpc0');
+
     tcp_server(
         $host, $port,
         sub ( $fh, $host, $port ) {
