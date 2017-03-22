@@ -379,11 +379,16 @@ sub get_packet ( $self, $input ) {
         $self->kex->recv_newkeys($self, $payload);
     } else {
         ### Unknown Packet Type: $msg_id
+        $self->error("DISCONNECT");
     }
 }
 
 sub send_newkeys_packet($self) {
     $self->send_packet($self->ssh_uint8( $MSGID{'SSH_MSG_NEWKEYS'} ));
+}
+
+sub send_disconnect_packet($self) {
+    $self->send_packet($self->ssh_uint8( $MSGID{'SSH_MSG_DISCONNECT'} ));
 }
 
 sub send_kexinit_packet($self) {
@@ -564,8 +569,9 @@ sub ssh_decode_uint8 ( $self, $data ) {
 }
 
 sub error ( $self, $error ) {
-    confess($error);
+    $self->send_disconnect_packet();
     $self->disconnect();
+    confess($error);
 }
 
 sub disconnect($self) {
