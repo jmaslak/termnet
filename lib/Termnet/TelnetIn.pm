@@ -51,20 +51,6 @@ has type => (
     default  => 'telnet',
 );
 
-has pending_events => (
-    is       => 'ro',
-    isa      => 'Str',
-    required => 1,
-    init_arg => '_pending',
-    default  => sub { return {} },
-    lazy     => 1,
-);
-
-has eof_cb => (
-    is  => 'rw',
-    isa => 'Maybe[CodeRef]',
-);
-
 sub accept_input_from_lower ( $self, $lower, $data ) {
     $self->input_buffer($data);
     my $cleandata = $self->telnet->get();

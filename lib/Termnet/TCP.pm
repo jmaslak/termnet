@@ -110,6 +110,13 @@ sub do_eof ( $self, $handle ) {
     }
 }
 
+sub do_error ( $self, $handle, $error ) {
+    warn($error);
+    if ( defined( $self->upper ) ) {
+        $self->upper->accept_command_from_lower( $self, 'EOF' );
+    }
+}
+
 __PACKAGE__->meta->make_immutable;
 
 1;
