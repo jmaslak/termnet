@@ -44,7 +44,6 @@ sub public_key($self, $ssh) {
         $self->rsa_public->get_key_parameters();
 
     my $blob = join '',
-        # $ssh->ssh_string('ssh-rsa;die("barbarbar")'),
         $ssh->ssh_string('ssh-rsa'),
         $ssh->ssh_mpint($e),
         $ssh->ssh_mpint($n);

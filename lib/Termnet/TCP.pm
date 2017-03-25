@@ -82,6 +82,7 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
     if ( $cmd eq 'OPEN SESSION' ) {
         # NOP
     } elsif ( $cmd eq 'DISCONNECT SESSION' ) {
+        ### Killing TCP Session
         $self->handle->push_shutdown;
         if ( defined( $self->upper ) ) {
             $upper->accept_command_from_lower( $self, 'EOF' );

@@ -82,6 +82,20 @@ has skip_next_key_exchange => (
     default  => 0,
 );
 
+has block_size_c2s => (
+    is => 'rw',
+    isa => 'Int',
+    required => 1,
+    default => 8,
+);
+
+has block_size_s2c => (
+    is => 'rw',
+    isa => 'Int',
+    required => 1,
+    default => 8,
+);
+
 has lower_buffer => (
     is       => 'rw',
     isa      => 'Str',
@@ -110,7 +124,7 @@ has recv_seq_no => (
     is       => 'rw',
     isa      => 'Int',
     required => 1,
-    init_arg => '_send_seq_no',
+    init_arg => '_recv_seq_no',
     default  => 0,
 );
 
@@ -154,6 +168,16 @@ has shk => (
     isa => 'Maybe[Termnet::SSH::SHK]',
 );
 
+has enc_c2s => (
+    is => 'rw',
+    isa => 'Maybe[Termnet::SSH::Cipher]',
+);
+
+has enc_s2c => (
+    is => 'rw',
+    isa => 'Maybe[Termnet::SSH::Cipher]',
+);
+
 has cipher_avail => (
     is       => 'rw',
     isa      => 'ArrayRef[Termnet::SSH::Cipher]',
@@ -184,6 +208,16 @@ sub _build_mac_avail($self) {
     $self->mac_avail( \@mac );
 }
 
+has mac_c2s => (
+    is => 'rw',
+    isa => 'Maybe[Termnet::SSH::Mac]',
+);
+
+has mac_s2c => (
+    is => 'rw',
+    isa => 'Maybe[Termnet::SSH::Mac]',
+);
+
 has v_client => (
     is  => 'rw',
     isa => 'Str',
@@ -206,24 +240,24 @@ has kexinit_server => (
     isa => 'Str',
 );
 
-has iv_c2s => (
+has enc_builder_s2c => (
     is => 'rw',
-    isa => 'Str',
+    isa => 'CodeRef',
 );
 
-has iv_s2c => (
+has enc_builder_c2s => (
     is => 'rw',
-    isa => 'Str',
+    isa => 'CodeRef',
 );
 
-has enc_c2s => (
+has mac_builder_s2c => (
     is => 'rw',
-    isa => 'Str',
+    isa => 'CodeRef',
 );
 
-has enc_s2c => (
+has mac_builder_c2s => (
     is => 'rw',
-    isa => 'Str',
+    isa => 'CodeRef',
 );
 
 has sign_c2s => (
@@ -324,35 +358,81 @@ sub get_handshake ( $self, $input ) {
 sub get_packet ( $self, $input ) {
     if ( length($input) < 5 ) { return; }
 
-    my $MACLEN = 0;
+    my $maclen = defined($self->mac_c2s) ? $self->mac_c2s->out_size : 0;
+
+    my $len = length($input);
+    my $encrypted = $input;
+
+    if ($len < $self->block_size_c2s != 0) {
+        $self->lower_buffer($input);
+        return;
+    }
+
+    # Do we need to decrypt?
+    my $iv;
+    if (defined($self->enc_c2s)) {
+        # decrypt start of packet
+        $iv = $self->enc_c2s->iv;
+        $input = $self->enc_c2s->decrypt( substr($encrypted, 0, $self->block_size_c2s ));
+    } else {
+        $input = substr($encrypted, 0, $self->block_size_c2s);
+    }
 
     my $packet_length  = unpack 'N', substr( $input, 0, 4 );
     my $padding_length = unpack 'C', substr( $input, 4, 1 );
     my $payload_length = $packet_length - $padding_length - 1;
 
-    if ( length($input) < ( 4 + $packet_length + $MACLEN ) ) {
+    if ( length($encrypted) < ( 4 + $packet_length + $maclen ) ) {
         ### Packet Length longer than data available: $packet_length
-        ### Our Len: length($input)
-        $self->lower_buffer($input);
+        ### Our Len: length($encrypted)
+        if (defined($iv)) { $self->enc_c2s->iv($iv); } # Reset IV 
+        $self->lower_buffer($encrypted);
         return;
     }
-    if ( length($input) > ( 4 + $packet_length + $MACLEN ) ) {
+
+    if ( length($encrypted) > ( 4 + $packet_length + $maclen ) ) {
         ### Received more than one packet
-        ### Storing: hexit(substr($input, 4 + $packet_length + $MACLEN))
-        $self->lower_buffer(substr($input, 4 + $packet_length + $MACLEN));
-        $input = substr($input, 0, 4 + $packet_length + $MACLEN);
+        ### Storing: hexit(substr($encrypted, 4 + $packet_length + $maclen))
+        $self->lower_buffer(substr($encrypted, 4 + $packet_length + $maclen));
+        $encrypted = substr($encrypted, 4 + $packet_length + $maclen);
+    }
+
+    my ($mac);
+    if ($maclen > 0) {
+        $mac = substr($encrypted, length($encrypted) - $maclen);
+        $encrypted = substr($encrypted, 0, length($encrypted) - $maclen);
+    }
+
+    if (length($encrypted) > $self->block_size_c2s) {
+        if (defined($self->enc_c2s)) {
+            # Decrypt rest of packet
+            $input .= $self->enc_c2s->decrypt( substr($encrypted, $self->block_size_c2s) );
+        } else {
+            $input .= substr($encrypted, $self->block_size_c2s);
+        }
     }
 
     if ( $padding_length < 4 ) { $self->error("Padding too short"); }
-
     my $payload = $payload_length ? substr( $input, 5,                   $payload_length ) : '';
     my $padding = $padding_length ? substr( $input, 5 + $payload_length, $padding_length ) : '';
-    my $mac     = $MACLEN         ? substr( $input, 4 + $packet_length,  $MACLEN )         : '';
 
+    my $seq = $self->recv_seq_no;
+    $self->recv_seq_no($self->recv_seq_no + 1 );
+    if ($maclen > 0) {
+        my $validmac = $self->mac_c2s->digest($seq, $input);
+        if ($validmac ne $mac) {
+            ### MAC1: hexit($validmac)
+            ### MAC2: hexit($mac)
+            $self->error("MAC not valid");
+        }
+    }
+
+    ### PL: $payload_length
+    ### LP: length($payload)
+    ### LE: length($encrypted)
+    ### LI: length($input)
     if ( $payload_length != length($payload) ) { $self->error("Corrupt payload length"); }
     if ( $padding_length != length($padding) ) { $self->error("Corrupt padding length"); }
-
-    # XXX Decrypt message and validate
 
     my $minlen = 1;
     if ( $payload_length < $minlen ) { $self->error("Message too short to make sense (${payload_length})"); }
@@ -440,12 +520,12 @@ sub recv_msg_kexinit ( $self, $payload ) {
     my $host_key = $self->ssh_decode_string($remainder);
 
     $remainder = $self->safe_substr( $remainder, length($host_key) + 4 );
-    my $crypt_c2s = $self->ssh_decode_string($remainder);
+    my $cipher_c2s = $self->ssh_decode_string($remainder);
 
-    $remainder = $self->safe_substr( $remainder, length($crypt_c2s) + 4 );
-    my $crypt_s2c = $self->ssh_decode_string($remainder);
+    $remainder = $self->safe_substr( $remainder, length($cipher_c2s) + 4 );
+    my $cipher_s2c = $self->ssh_decode_string($remainder);
 
-    $remainder = $self->safe_substr( $remainder, length($crypt_s2c) + 4 );
+    $remainder = $self->safe_substr( $remainder, length($cipher_s2c) + 4 );
     my $mac_c2s = $self->ssh_decode_string($remainder);
 
     $remainder = $self->safe_substr( $remainder, length($mac_c2s) + 4 );
@@ -495,8 +575,7 @@ sub recv_msg_kexinit ( $self, $payload ) {
         }
     }
 
-    # Determine SHK Algorithm  XXX: This is backwards, we should honor
-    # client order
+    # Determine SHK Algorithm
     my (@our_shk) = $self->server_host_key_avail->@*;
     my (@their_shk) = split ',', $host_key, -1;
     if ( !@their_shk ) { $self->error("Remote did not send any server host key options"); }
@@ -513,6 +592,74 @@ sub recv_msg_kexinit ( $self, $payload ) {
         }
     }
 
+    # Determine Cipher Algorithm
+    my (@our_cipher) = $self->cipher_avail->@*;
+    my (@their_cipher_c2s) = split ',', $cipher_c2s, -1;
+    if ( !@their_cipher_c2s ) { $self->error("Remote did not send any client to server cipher options"); }
+
+    while ( !defined( $self->enc_builder_c2s ) ) {
+        if ( !@their_cipher_c2s ) {
+            $self->error("Could not negotiate a client to server encryption algorithm");
+        }
+
+        my $k = shift @their_cipher_c2s;
+        if ( any { $_->id() eq $k } @our_cipher ) {
+            my $match = ( grep { $_->id() eq $k } @our_cipher )[0];
+            $self->enc_builder_c2s( $match->get_creator() );
+            ### C2S Cipher Negotiate: $match->id()
+        }
+    }
+
+    my (@their_cipher_s2c) = split ',', $cipher_s2c, -1;
+    if ( !@their_cipher_s2c ) { $self->error("Remote did not send any client to server cipher options"); }
+
+    while ( !defined( $self->enc_builder_s2c ) ) {
+        if ( !@their_cipher_s2c ) {
+            $self->error("Could not negotiate a client to server encryption algorithm");
+        }
+
+        my $k = shift @their_cipher_s2c;
+        if ( any { $_->id() eq $k } @our_cipher ) {
+            my $match = ( grep { $_->id() eq $k } @our_cipher )[0];
+            $self->enc_builder_s2c( $match->get_creator() );
+            ### S2C Cipher Negotiate: $match->id()
+        }
+    }
+
+    # Determine MAC Algorithm
+    my (@our_mac) = $self->mac_avail->@*;
+    my (@their_mac_c2s) = split ',', $mac_c2s, -1;
+    if ( !@their_mac_c2s ) { $self->error("Remote did not send any client to server MAC options"); }
+
+    while ( !defined( $self->mac_builder_c2s ) ) {
+        if ( !@their_mac_c2s ) {
+            $self->error("Could not negotiate a client to server MAC algorithm");
+        }
+
+        my $k = shift @their_mac_c2s;
+        if ( any { $_->id() eq $k } @our_mac ) {
+            my $match = ( grep { $_->id() eq $k } @our_mac )[0];
+            $self->mac_builder_c2s( $match->get_creator() );
+            ### C2S MAC  Negotiate: $match->id()
+        }
+    }
+
+    my (@their_mac_s2c) = split ',', $mac_s2c, -1;
+    if ( !@their_mac_s2c ) { $self->error("Remote did not send any client to server MAC options"); }
+
+    while ( !defined( $self->mac_builder_s2c ) ) {
+        if ( !@their_mac_s2c ) {
+            $self->error("Could not negotiate a client to server MAC algorithm");
+        }
+
+        my $k = shift @their_mac_s2c;
+        if ( any { $_->id() eq $k } @our_mac ) {
+            my $match = ( grep { $_->id() eq $k } @our_mac )[0];
+            $self->mac_builder_s2c( $match->get_creator() );
+            ### S2C MAC Negotiate: $match->id()
+        }
+    }
+
     ### KEX Negotiate: $self->kex->id
     ### KEX Skip: $self->skip_next_key_exchange
     ### SHK Negotiate: $self->shk->id
@@ -520,15 +667,30 @@ sub recv_msg_kexinit ( $self, $payload ) {
 
 sub send_packet ( $self, $payload ) {
     my $payloadlen = length($payload);
-    my $paddinglen = ( ( ( 5 + $payloadlen ) % 8 ) == 0 ) ? 0 : ( 8 - ( ( 5 + $payloadlen ) % 8 ) );
+    my $paddinglen = ( ( ( 5 + $payloadlen ) % $self->block_size_s2c ) == 0 ) ? 0 : ( $self->block_size_s2c - ( ( 5 + $payloadlen ) % $self->block_size_s2c ) );
 
-    $paddinglen = $paddinglen < 4 ? $paddinglen + 8 : $paddinglen;
+    $paddinglen = $paddinglen < 4 ? $paddinglen + $self->block_size_s2c : $paddinglen;
     my $padding = $paddinglen ? random_bytes($paddinglen) : 0;
 
     $payload = $self->ssh_uint8($paddinglen) . $payload . $padding;
     my $pktlen = length($payload);
 
     my $pkt = $self->ssh_uint32($pktlen) . $payload;
+
+    my $seq = $self->send_seq_no;
+    $self->send_seq_no($self->send_seq_no + 1);
+  
+    my $mac = ''; 
+    if (defined($self->mac_s2c)) {
+        my $mac = $self->mac_s2c->digest($seq, $pkt);
+    }
+
+    if (defined($self->enc_s2c)) {
+        my $enc = $self->enc_s2c->encrypt($pkt);
+        $pkt = $enc;
+    }
+
+    $pkt .= $mac;
 
     $self->lower->accept_input_from_upper( $self, $pkt );
 }

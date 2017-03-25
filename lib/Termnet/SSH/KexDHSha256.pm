@@ -74,12 +74,12 @@ has k => (
 );
 
 has h => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
 has session_id => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
@@ -164,16 +164,16 @@ sub send_msg_reply ( $self, $ssh ) {
     );
     $self->dh($dh);
     $self->dh->generate_keys;
-    $self->f($self->dh->pub_key);
-    $self->k($self->dh->compute_secret( $self->e ));
+    $self->f( $self->dh->pub_key );
+    $self->k( $self->dh->compute_secret( $self->e ) );
 
-    if ($self->e >= $self->p ) { # RFC4419 Section 3
+    if ( $self->e >= $self->p ) {    # RFC4419 Section 3
         $ssh->error("e is bigger than k");
     }
-    if ($self->f >= $self->p ) { # RFC4419 Section 3
+    if ( $self->f >= $self->p ) {    # RFC4419 Section 3
         $ssh->error("f is bigger than k");
     }
-    if ($self->k >= $self->p ) { # RFC4419 Section 3
+    if ( $self->k >= $self->p ) {    # RFC4419 Section 3
         $ssh->error("p is bigger than k");
     }
 
@@ -192,36 +192,58 @@ sub send_msg_reply ( $self, $ssh ) {
       $ssh->ssh_mpint( $self->f ),
       $ssh->ssh_mpint( $self->k );
     if ( !defined($hashstr) ) { $ssh->error("Problem with hash combination") }
-    $self->h(sha256($hashstr));
-    $self->session_id($self->h);  # This is always the first H
+    $self->h( sha256($hashstr) );
+    $self->session_id( $self->h );    # This is always the first H
 
-    my $signed = $ssh->shk->sign($ssh, $self->h);
+    my $signed = $ssh->shk->sign( $ssh, $self->h );
     my $sig = $ssh->ssh_string('ssh-rsa') . $ssh->ssh_string($signed);
 
     my $payload = join( '',
         $ssh->ssh_uint8( $MSGID{SSH_MSG_KEX_DH_GEX_REPLY} ),
         $ssh->ssh_string( $ssh->shk->public_key($ssh) ),
-        $ssh->ssh_mpint($self->f),
+        $ssh->ssh_mpint( $self->f ),
         $ssh->ssh_string($sig),
     );
-   
-    ### Sending Message Type SSH_MSG_NEWKEYS 
+
+    ### Sending Message Type SSH_MSG_NEWKEYS
     $ssh->send_packet($payload);
     $ssh->send_newkeys_packet();
 
     # Set server to client keys
-    $ssh->iv_s2c(sha256($self->k . $self->h . 'B' . $self->session_id));
-    $ssh->enc_s2c(sha256($self->k . $self->h . 'D' . $self->session_id));
-    $ssh->sign_s2c(sha256($self->k . $self->h . 'F' . $self->session_id));
+    my $mpint_k = $ssh->ssh_mpint( $self->k );
+    my $iv      = sha256( $mpint_k . $self->h . 'B' . $self->session_id );
+    my $key     = sha256( $mpint_k . $self->h . 'D' . $self->session_id );
+
+    my $enc = $ssh->enc_builder_s2c->( iv => $iv, key => $key );
+    $ssh->enc_s2c($enc);
+
+    $ssh->sign_s2c( sha256( $mpint_k . $self->h . 'F' . $self->session_id ) );
+    $ssh->block_size_s2c( $ssh->enc_s2c->block_size );
+
+    my $mac = $ssh->mac_builder_s2c->( key => $ssh->sign_s2c );
+    $ssh->mac_s2c($mac);
+    ### MAC KEY: hexit($ssh->mac_s2c->key)
 }
 
-sub recv_newkeys($self, $ssh, $payload) {
+sub recv_newkeys ( $self, $ssh, $payload ) {
     ### Received Message Type SSH_MSG_NEWKEYS
 
     # Set client to server keys
-    $ssh->iv_c2s(sha256($self->k . $self->h . 'A' . $self->session_id));
-    $ssh->enc_c2s(sha256($self->k . $self->h . 'C' . $self->session_id));
-    $ssh->sign_c2s(sha256($self->k . $self->h . 'E' . $self->session_id));
+    my $mpint_k = $ssh->ssh_mpint( $self->k );
+    my $iv      = sha256( $mpint_k . $self->h . 'A' . $self->session_id );
+    my $key     = sha256( $mpint_k . $self->h . 'C' . $self->session_id );
+
+    ### IV: hexit($iv)
+    ### Ky: hexit($key)
+
+    my $enc = $ssh->enc_builder_c2s->( iv => $iv, key => $key );
+    $ssh->enc_c2s($enc);
+
+    $ssh->sign_c2s( sha256( $mpint_k . $self->h . 'E' . $self->session_id ) );
+    $ssh->block_size_c2s( $ssh->enc_c2s->block_size );
+
+    my $mac = $ssh->mac_builder_c2s->( key => $ssh->sign_c2s );
+    $ssh->mac_c2s($mac);
 }
 
 sub binary_to_bigint ( $self, $num ) {
