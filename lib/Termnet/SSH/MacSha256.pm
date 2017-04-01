@@ -19,8 +19,6 @@ sub key_size { return 32; } # 256
 sub out_size { return 32; } # 256
 
 sub digest($self, $seq, $data) {
-    ### SEQ: $seq
-    ### DAT: hexit($data)
     return hmac_sha256(uint32($seq) . $data, $self->key);
 }
 

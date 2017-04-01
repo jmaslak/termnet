@@ -38,8 +38,6 @@ sub decrypt ( $self, $msg ) {
 
     my @out;
     foreach my $block (@blocks) {
-        ### L: length($block)
-        ### H: hexit($self->aes->encrypt($self->iv))
         push @out, $self->aes->encrypt($self->iv) ^ $block;
         $self->next_iv();
     }

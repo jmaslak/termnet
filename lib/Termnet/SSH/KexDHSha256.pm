@@ -83,6 +83,13 @@ has session_id => (
     isa => 'Str',
 );
 
+has wait_for_newkey => (
+    is => 'rw',
+    isa => 'Bool',
+    required => 1,
+    default => 0,
+);
+
 sub BUILD ( $self, @args ) {
     state $dh;
 }
@@ -99,6 +106,9 @@ sub handle_msg ( $self, $ssh, $payload ) {
         $self->recv_msg_init( $ssh, $payload );
     } else {
         ### Receive Unknown KEX Message Type: $msg_id
+        ## XXX Note that this should be fixed so that it handles wrap
+        ##     around.
+        $ssh->send_unimplemented_packet($ssh->recv_seq_no - 1);
     }
 }
 
@@ -209,6 +219,10 @@ sub send_msg_reply ( $self, $ssh ) {
     $ssh->send_packet($payload);
     $ssh->send_newkeys_packet();
 
+    # We can wait for a new key request now
+    $self->wait_for_newkey(1);
+    $ssh->state('connected');
+
     # Set server to client keys
     my $mpint_k = $ssh->ssh_mpint( $self->k );
     my $iv      = sha256( $mpint_k . $self->h . 'B' . $self->session_id );
@@ -222,19 +236,20 @@ sub send_msg_reply ( $self, $ssh ) {
 
     my $mac = $ssh->mac_builder_s2c->( key => $ssh->sign_s2c );
     $ssh->mac_s2c($mac);
-    ### MAC KEY: hexit($ssh->mac_s2c->key)
 }
 
 sub recv_newkeys ( $self, $ssh, $payload ) {
     ### Received Message Type SSH_MSG_NEWKEYS
 
+    if (! $self->wait_for_newkey) {
+        $ssh->error('Received newkeys when not expecting newkeys');
+    }
+    $self->wait_for_newkey(0);
+
     # Set client to server keys
     my $mpint_k = $ssh->ssh_mpint( $self->k );
     my $iv      = sha256( $mpint_k . $self->h . 'A' . $self->session_id );
     my $key     = sha256( $mpint_k . $self->h . 'C' . $self->session_id );
-
-    ### IV: hexit($iv)
-    ### Ky: hexit($key)
 
     my $enc = $ssh->enc_builder_c2s->( iv => $iv, key => $key );
     $ssh->enc_c2s($enc);

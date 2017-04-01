@@ -58,6 +58,26 @@ my (%MSGID) = (
 );
 my (%MSGNAME) = map { $MSGID{$_}, $_ } keys %MSGID;
 
+# DR = Disconnect Reason
+my (%DR) = (
+    SSH_DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT    => 1,
+    SSH_DISCONNECT_PROTOCOL_ERROR                 => 2,
+    SSH_DISCONNECT_KEY_EXCHANGE_FAILED            => 3,
+    SSH_DISCONNECT_RESERVED                       => 4,
+    SSH_DISCONNECT_MAC_ERROR                      => 5,
+    SSH_DISCONNECT_COMPRESSION_ERROR              => 6,
+    SSH_DISCONNECT_SERVICE_NOT_AVAILABLE          => 7,
+    SSH_DISCONNECT_PROTOCOL_VERSION_NOT_SUPPORTED => 8,
+    SSH_DISCONNECT_HOST_KEY_NOT_VERIFIABLE        => 9,
+    SSH_DISCONNECT_CONNECTION_LOST                => 10,
+    SSH_DISCONNECT_BY_APPLICATION                 => 11,
+    SSH_DISCONNECT_TOO_MANY_CONNECTIONS           => 12,
+    SSH_DISCONNECT_AUTH_CANCELLED_BY_USER         => 13,
+    SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE => 14,
+    SSH_DISCONNECT_ILLEGAL_USER_NAME              => 15,
+);
+my (%DRNAME) = map { $DR{$_}, $_ } keys %DR;
+
 has type => (
     is       => 'ro',
     isa      => 'Str',
@@ -71,7 +91,10 @@ has state => (
     isa      => 'Str',
     required => 1,
     init_arg => '_state',
-    default  => 'handshake',
+    default  => 'handshake',    # handshake - not yet received client version
+                                # keyexchange - no keys have been
+                                #               exchanged yet
+                                # connect - we have a secure transport
 );
 
 has skip_next_key_exchange => (
@@ -83,17 +106,17 @@ has skip_next_key_exchange => (
 );
 
 has block_size_c2s => (
-    is => 'rw',
-    isa => 'Int',
+    is       => 'rw',
+    isa      => 'Int',
     required => 1,
-    default => 8,
+    default  => 8,
 );
 
 has block_size_s2c => (
-    is => 'rw',
-    isa => 'Int',
+    is       => 'rw',
+    isa      => 'Int',
     required => 1,
-    default => 8,
+    default  => 8,
 );
 
 has lower_buffer => (
@@ -169,12 +192,12 @@ has shk => (
 );
 
 has enc_c2s => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Maybe[Termnet::SSH::Cipher]',
 );
 
 has enc_s2c => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Maybe[Termnet::SSH::Cipher]',
 );
 
@@ -209,12 +232,12 @@ sub _build_mac_avail($self) {
 }
 
 has mac_c2s => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Maybe[Termnet::SSH::Mac]',
 );
 
 has mac_s2c => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Maybe[Termnet::SSH::Mac]',
 );
 
@@ -231,42 +254,42 @@ has v_server => (
 );
 
 has kexinit_client => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
 has kexinit_server => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
 has enc_builder_s2c => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'CodeRef',
 );
 
 has enc_builder_c2s => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'CodeRef',
 );
 
 has mac_builder_s2c => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'CodeRef',
 );
 
 has mac_builder_c2s => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'CodeRef',
 );
 
 has sign_c2s => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
 has sign_s2c => (
-    is => 'rw',
+    is  => 'rw',
     isa => 'Str',
 );
 
@@ -324,7 +347,7 @@ after 'register_lower' => sub ( $self, $lower ) {
 };
 
 sub init_negotiate($self) {
-    $self->send_raw_line($self->v_server());
+    $self->send_raw_line( $self->v_server() );
 }
 
 sub get_handshake ( $self, $input ) {
@@ -338,11 +361,19 @@ sub get_handshake ( $self, $input ) {
 
     my ($ver) = $line =~ m/^SSH-(\d+\.\d+)-.*$/s;
     if ( !defined($ver) ) {
-        $self->error("Invalid SSH handshake");
+        $self->error(
+            "Invalid SSH handshake",
+            $DR{SSH_DISCONNECT_PROTOCOL_VERSION_NOT_SUPPORTED},
+            'Invalid SSH handshake'
+        );
         return;
     }
     if ( $ver < 2.0 ) {
-        $self->error("Cannot negotiate SSH 2.0");
+        $self->error(
+            "Cannot negotiate SSH 2.0",
+            $DR{SSH_DISCONNECT_PROTOCOL_VERSION_NOT_SUPPORTED},
+            'Cannot negotiate SSH 2.0'
+        );
         return;
     }
 
@@ -351,31 +382,31 @@ sub get_handshake ( $self, $input ) {
     ### Handshake: $c_ver
     $self->v_client($c_ver);
 
-    $self->state('connected');
+    $self->state('keyexchange');
     $self->send_kexinit_packet();
 }
 
 sub get_packet ( $self, $input ) {
     if ( length($input) < 5 ) { return; }
 
-    my $maclen = defined($self->mac_c2s) ? $self->mac_c2s->out_size : 0;
+    my $maclen = defined( $self->mac_c2s ) ? $self->mac_c2s->out_size : 0;
 
-    my $len = length($input);
+    my $len       = length($input);
     my $encrypted = $input;
 
-    if ($len < $self->block_size_c2s != 0) {
+    if ( $len < $self->block_size_c2s != 0 ) {
         $self->lower_buffer($input);
         return;
     }
 
     # Do we need to decrypt?
     my $iv;
-    if (defined($self->enc_c2s)) {
+    if ( defined( $self->enc_c2s ) ) {
         # decrypt start of packet
         $iv = $self->enc_c2s->iv;
-        $input = $self->enc_c2s->decrypt( substr($encrypted, 0, $self->block_size_c2s ));
+        $input = $self->enc_c2s->decrypt( substr( $encrypted, 0, $self->block_size_c2s ) );
     } else {
-        $input = substr($encrypted, 0, $self->block_size_c2s);
+        $input = substr( $encrypted, 0, $self->block_size_c2s );
     }
 
     my $packet_length  = unpack 'N', substr( $input, 0, 4 );
@@ -383,59 +414,53 @@ sub get_packet ( $self, $input ) {
     my $payload_length = $packet_length - $padding_length - 1;
 
     if ( length($encrypted) < ( 4 + $packet_length + $maclen ) ) {
-        ### Packet Length longer than data available: $packet_length
-        ### Our Len: length($encrypted)
-        if (defined($iv)) { $self->enc_c2s->iv($iv); } # Reset IV 
+        ### Entire packet not yet received
+        if ( defined($iv) ) { $self->enc_c2s->iv($iv); }    # Reset IV
         $self->lower_buffer($encrypted);
         return;
     }
 
     if ( length($encrypted) > ( 4 + $packet_length + $maclen ) ) {
         ### Received more than one packet
-        ### Storing: hexit(substr($encrypted, 4 + $packet_length + $maclen))
-        $self->lower_buffer(substr($encrypted, 4 + $packet_length + $maclen));
-        $encrypted = substr($encrypted, 4 + $packet_length + $maclen);
+        $self->lower_buffer( substr( $encrypted, 4 + $packet_length + $maclen ) );
+        $encrypted = substr( $encrypted, 4 + $packet_length + $maclen );
     }
 
     my ($mac);
-    if ($maclen > 0) {
-        $mac = substr($encrypted, length($encrypted) - $maclen);
-        $encrypted = substr($encrypted, 0, length($encrypted) - $maclen);
+    if ( $maclen > 0 ) {
+        $mac = substr( $encrypted, length($encrypted) - $maclen );
+        $encrypted = substr( $encrypted, 0, length($encrypted) - $maclen );
     }
 
-    if (length($encrypted) > $self->block_size_c2s) {
-        if (defined($self->enc_c2s)) {
+    if ( length($encrypted) > $self->block_size_c2s ) {
+        if ( defined( $self->enc_c2s ) ) {
             # Decrypt rest of packet
-            $input .= $self->enc_c2s->decrypt( substr($encrypted, $self->block_size_c2s) );
+            $input .= $self->enc_c2s->decrypt( substr( $encrypted, $self->block_size_c2s ) );
         } else {
-            $input .= substr($encrypted, $self->block_size_c2s);
+            $input .= substr( $encrypted, $self->block_size_c2s );
         }
     }
 
-    if ( $padding_length < 4 ) { $self->error("Padding too short"); }
-    my $payload = $payload_length ? substr( $input, 5,                   $payload_length ) : '';
+    if ( $padding_length < 4 ) { $self->error("Padding too short") }
+    my $payload = $payload_length ? substr( $input, 5, $payload_length ) : '';
     my $padding = $padding_length ? substr( $input, 5 + $payload_length, $padding_length ) : '';
 
     my $seq = $self->recv_seq_no;
-    $self->recv_seq_no($self->recv_seq_no + 1 );
-    if ($maclen > 0) {
-        my $validmac = $self->mac_c2s->digest($seq, $input);
-        if ($validmac ne $mac) {
-            ### MAC1: hexit($validmac)
-            ### MAC2: hexit($mac)
+    $self->recv_seq_no( $self->recv_seq_no + 1 );
+    if ( $maclen > 0 ) {
+        my $validmac = $self->mac_c2s->digest( $seq, $input );
+        if ( $validmac ne $mac ) {
             $self->error("MAC not valid");
         }
     }
 
-    ### PL: $payload_length
-    ### LP: length($payload)
-    ### LE: length($encrypted)
-    ### LI: length($input)
     if ( $payload_length != length($payload) ) { $self->error("Corrupt payload length"); }
     if ( $padding_length != length($padding) ) { $self->error("Corrupt padding length"); }
 
     my $minlen = 1;
-    if ( $payload_length < $minlen ) { $self->error("Message too short to make sense (${payload_length})"); }
+    if ( $payload_length < $minlen ) {
+        $self->error("Message too short to make sense (${payload_length})");
+    }
 
     my $msg_id = unpack 'C', $payload;
     if ( ( $msg_id >= 30 ) && ( $msg_id <= 49 ) ) {    # RFC4251 7
@@ -456,19 +481,48 @@ sub get_packet ( $self, $input ) {
     } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_KEXINIT' ) {
         $self->recv_msg_kexinit($payload);
     } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_NEWKEYS' ) {
-        $self->kex->recv_newkeys($self, $payload);
+        $self->kex->recv_newkeys( $self, $payload );
+    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_SERVICE_REQUEST' ) {
+        $self->recv_svc_request($payload);
+    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_USERAUTH_REQUEST' ) {
+        $self->recv_userauth_request($payload);
     } else {
         ### Unknown Packet Type: $msg_id
-        $self->error("DISCONNECT");
+        $self->send_unimplemented_packet($seq);
     }
 }
 
 sub send_newkeys_packet($self) {
-    $self->send_packet($self->ssh_uint8( $MSGID{'SSH_MSG_NEWKEYS'} ));
+    $self->send_packet( $self->ssh_uint8( $MSGID{'SSH_MSG_NEWKEYS'} ) );
 }
 
-sub send_disconnect_packet($self) {
-    $self->send_packet($self->ssh_uint8( $MSGID{'SSH_MSG_DISCONNECT'} ));
+sub send_unimplemented_packet ( $self, $seq ) {
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_UNIMPLEMENTED'} );
+    $pkt .= $self->ssh_uint32($seq);
+
+    $self->send_packet($pkt);
+}
+
+sub send_userauth_success( $self ) {
+    ### Sending Message Type SSH_MSG_USERAUTH_ACCEPT
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_USERAUTH_SUCCESS'} );
+    $self->send_packet($pkt);
+}
+
+sub send_disconnect_packet ( $self, $reason_code, $reason ) {
+    if ( !defined($reason_code) ) {
+        $reason_code = $DR{SSH_DISCONNECT_PROTOCOL_ERROR};
+    }
+    if ( !defined($reason) ) {
+        $reason = 'Protocol Violation';
+    }
+
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_DISCONNECT'} );
+    $pkt .= $self->ssh_uint32($reason_code);
+    $pkt .= $self->ssh_string($reason);
+    $pkt .= $self->ssh_string('en');
+
+    $self->send_packet($pkt);
 }
 
 sub send_kexinit_packet($self) {
@@ -503,6 +557,14 @@ sub send_kexinit_packet($self) {
     );
     $self->send_packet($payload);
     $self->kexinit_server($payload);
+}
+
+sub send_svc_accept_packet ( $self, $service ) {
+    ### Sending SERVICE_ACCEPT for: $service
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_SERVICE_ACCEPT'} );
+    $pkt .= $self->ssh_string($service);
+
+    $self->send_packet($pkt);
 }
 
 sub recv_msg_kexinit ( $self, $payload ) {
@@ -595,7 +657,9 @@ sub recv_msg_kexinit ( $self, $payload ) {
     # Determine Cipher Algorithm
     my (@our_cipher) = $self->cipher_avail->@*;
     my (@their_cipher_c2s) = split ',', $cipher_c2s, -1;
-    if ( !@their_cipher_c2s ) { $self->error("Remote did not send any client to server cipher options"); }
+    if ( !@their_cipher_c2s ) {
+        $self->error("Remote did not send any client to server cipher options");
+    }
 
     while ( !defined( $self->enc_builder_c2s ) ) {
         if ( !@their_cipher_c2s ) {
@@ -611,7 +675,9 @@ sub recv_msg_kexinit ( $self, $payload ) {
     }
 
     my (@their_cipher_s2c) = split ',', $cipher_s2c, -1;
-    if ( !@their_cipher_s2c ) { $self->error("Remote did not send any client to server cipher options"); }
+    if ( !@their_cipher_s2c ) {
+        $self->error("Remote did not send any client to server cipher options");
+    }
 
     while ( !defined( $self->enc_builder_s2c ) ) {
         if ( !@their_cipher_s2c ) {
@@ -665,9 +731,73 @@ sub recv_msg_kexinit ( $self, $payload ) {
     ### SHK Negotiate: $self->shk->id
 }
 
+sub recv_svc_request ( $self, $payload ) {
+    ### Received Message Type SERVICE_REQUEST
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Service request seen before secure transport established");
+    }
+
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $payload, 0, 1 ) );
+    my $service = $self->ssh_decode_string( $self->safe_substr( $payload, 1 ) );
+
+    if ( lc($service) eq 'ssh-userauth' ) {
+        ### Service request for ssh-userauth
+        $self->send_svc_accept_packet($service);
+    } elsif ( lc($service) eq 'foo' ) {
+        # Foo
+    } else {
+        ### Unknown service request for: $service
+        ## XXX Handle wrap-around better
+        $self->send_unimplemented_packet( $self->recv_seq_no - 1 );
+    }
+}
+
+sub recv_userauth_request ( $self, $payload ) {
+    ### Received Message Type USERAUTH_REQUEST
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Authentication request seen before secure transport established");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $user = $self->ssh_decode_string($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 + length($user) );
+
+    my $service = $self->ssh_decode_string($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 + length($service) );
+
+    my $method = $self->ssh_decode_string($remainder);
+    if ( length($method) + 4 >= length($remainder) ) {
+        $remainder = '';
+    } else {
+        $remainder = $self->safe_substr( $remainder, 4 + length($method) );
+    }
+
+    ### User    : $user
+    ### Service : $service
+    ### Method  : $method
+
+    if ( $service eq 'ssh-connection' ) {
+        $self->send_userauth_success();
+    } else {
+        $self->error(
+            'Service not available',
+            $DR{SSH_DISCONNECT_SERVICE_NOT_AVAILABLE},
+            'Service not available'
+        );
+    }
+}
+
 sub send_packet ( $self, $payload ) {
     my $payloadlen = length($payload);
-    my $paddinglen = ( ( ( 5 + $payloadlen ) % $self->block_size_s2c ) == 0 ) ? 0 : ( $self->block_size_s2c - ( ( 5 + $payloadlen ) % $self->block_size_s2c ) );
+    my $paddinglen =
+      ( ( ( 5 + $payloadlen ) % $self->block_size_s2c ) == 0 )
+      ? 0
+      : ( $self->block_size_s2c - ( ( 5 + $payloadlen ) % $self->block_size_s2c ) );
 
     $paddinglen = $paddinglen < 4 ? $paddinglen + $self->block_size_s2c : $paddinglen;
     my $padding = $paddinglen ? random_bytes($paddinglen) : 0;
@@ -678,14 +808,14 @@ sub send_packet ( $self, $payload ) {
     my $pkt = $self->ssh_uint32($pktlen) . $payload;
 
     my $seq = $self->send_seq_no;
-    $self->send_seq_no($self->send_seq_no + 1);
-  
-    my $mac = ''; 
-    if (defined($self->mac_s2c)) {
-        my $mac = $self->mac_s2c->digest($seq, $pkt);
+    $self->send_seq_no( $self->send_seq_no + 1 );
+
+    my $mac = '';
+    if ( defined( $self->mac_s2c ) ) {
+        $mac = $self->mac_s2c->digest( $seq, $pkt );
     }
 
-    if (defined($self->enc_s2c)) {
+    if ( defined( $self->enc_s2c ) ) {
         my $enc = $self->enc_s2c->encrypt($pkt);
         $pkt = $enc;
     }
@@ -700,9 +830,9 @@ sub ssh_string ( $self, $data ) {
 }
 
 sub ssh_mpint ( $self, $num ) {
-    my $s = Math::BigInt->from_hex($num->to_hex)->to_bytes;
-    my $firstval = ord($self->safe_substr($s, 0, 1));
-    if ($firstval >= 128) { $s = chr(0) . $s; }
+    my $s = Math::BigInt->from_hex( $num->to_hex )->to_bytes;
+    my $firstval = ord( $self->safe_substr( $s, 0, 1 ) );
+    if ( $firstval >= 128 ) { $s = chr(0) . $s; }
 
     return $self->ssh_string($s);
 }
@@ -730,8 +860,8 @@ sub ssh_decode_uint8 ( $self, $data ) {
     return unpack( 'C', $data );
 }
 
-sub error ( $self, $error ) {
-    $self->send_disconnect_packet();
+sub error ( $self, $error, $reason_code = undef, $reason = undef ) {
+    $self->send_disconnect_packet( $reason_code, $reason );
     $self->disconnect();
     confess($error);
 }
