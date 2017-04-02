@@ -653,14 +653,14 @@ sub send_channel_data($self) {
     ### assert: length($self->upper_buffer) > 0
 
     while ( ( $self->upper_buffer ne '' ) && ( $self->win_theirs > 0 ) ) {
-        ### Sending CHANNEL_DATA
+        ##### Sending CHANNEL_DATA
         my $data = $self->upper_buffer;
 
         my $max_sz = min( $self->pkt_size_theirs, $self->win_theirs );
         if ( $max_sz == 0 ) { return; }    # Can't send right now
 
         if ( length($data) > $max_sz ) {
-            $self->upper_buffer = $self->safe_substr( $data, $max_sz );
+            $self->upper_buffer($self->safe_substr( $data, $max_sz ));
             $data = $self->safe_substr( $data, 0, $max_sz );
         } else {
             $self->upper_buffer('');
@@ -1108,7 +1108,9 @@ sub recv_channel_window_adjust ( $self, $payload ) {
         $self->error("Channel request on wrong channel");
     }
 
+    ### Old Window: $self->win_theirs
     ### Window Adjustment: $adjust
+    ### New Window: $self->win_theirs + $adjust
 
     $self->win_theirs( $self->win_theirs + $adjust );
     if ( $self->win_theirs >= ( 2**32 ) ) {
@@ -1122,7 +1124,7 @@ sub recv_channel_window_adjust ( $self, $payload ) {
 }
 
 sub recv_channel_data ( $self, $payload ) {
-    ### Received Message Type CHANNEL_DATA
+    ##### Received Message Type CHANNEL_DATA
     if ( $self->state ne 'connected' ) {
         ### Wrong state: $self->state
         $self->error("Channel data seen before secure transport established");
