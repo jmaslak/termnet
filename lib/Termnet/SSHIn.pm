@@ -1110,8 +1110,8 @@ sub recv_channel_window_adjust ( $self, $payload ) {
 
     ### Window Adjustment: $adjust
 
-    $self->window_theirs( $self->window_theirs + $adjust );
-    if ( $self->window_theirs >= ( 2**32 ) ) {
+    $self->win_theirs( $self->win_theirs + $adjust );
+    if ( $self->win_theirs >= ( 2**32 ) ) {
         $self->error("Their window size grew too much.");
     }
 
