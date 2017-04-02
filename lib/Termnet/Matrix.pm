@@ -77,14 +77,16 @@ sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
         return $self->get_activity();
     } elsif ( $cmd eq 'LIST NAMES' ) {
         return $self->get_names();
-    } elsif ($ cmd eq 'CONNECT' ) {
+    } elsif ( $cmd eq 'CONNECT' ) {
         my ($peer) = @data;
-        if ( ($peer // '') eq '' ) { return undef; }
-        if (!exists($self->names->{$peer})) { return undef; }
-        if ($lower->id eq $self->names->{$peer}{id}) { return undef; }
+        if ( ( $peer // '' ) eq '' ) { return undef; }
+        if ( !exists( $self->names->{$peer} ) )        { return undef; }
+        if ( $lower->id eq $self->names->{$peer}{id} ) { return undef; }
 
         $self->connect_lowers( $lower->id, $self->names->{$peer}{id} );
         return 1;
+    } elsif ( $cmd eq 'HANGUP' ) {
+        $self->disconnect( $lower->id );
     } else {
         die("Unknown command received from lower layer: $cmd");
     }
@@ -114,10 +116,10 @@ before 'deregister_lower' => sub ( $self, $lower ) {
 
 sub get_activity($self) {
     my %out;
-    foreach my $id (sort keys $self->lower->%*) {
+    foreach my $id ( sort keys $self->lower->%* ) {
         $out{$id} = {
             id         => $id,
-            connection => exists($self->connection->{$id}) ? $self->connection->{$id} : undef,
+            connection => exists( $self->connection->{$id} ) ? $self->connection->{$id} : undef,
         };
     }
     return \%out;
@@ -126,11 +128,12 @@ sub get_activity($self) {
 sub get_names($self) {
     my (%out) = $self->names->%*;
 
-    foreach my $n (sort keys %out) {
+    foreach my $n ( sort keys %out ) {
         my $id = $out{$n}->{id};
-        $out{$n}->{connection} = exists($self->connection->{$id}) ? $self->connection->{$id} : undef;
+        $out{$n}->{connection} =
+          exists( $self->connection->{$id} ) ? $self->connection->{$id} : undef;
     }
-    
+
     return \%out;
 }
 

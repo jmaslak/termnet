@@ -8,13 +8,22 @@
 package Termnet::Menu;
 
 use Termnet::Boilerplate 'class';
+use AnyEvent;
 use List::Util qw(max);
+use Time::HiRes qw(time);
 
 with 'Termnet::Lower', 'Termnet::UpperSingleChild';
 
-my (@possibilities) = qw(activity connect exit list spew);
+my (@possibilities) = qw(activity buffer connect exit hangup list resume spew);
 
 has input_buffer => (
+    is       => 'rw',
+    isa      => 'Str',
+    default  => sub { '' },
+    required => 1,
+);
+
+has upper_buffer => (
     is       => 'rw',
     isa      => 'Str',
     default  => sub { '' },
@@ -29,6 +38,11 @@ has type => (
     default  => 'menu',
 );
 
+#
+# menu           = typical menu
+# connected      = connected
+# conn_suspended = esc seq received
+#
 has mode => (
     is       => 'rw',
     isa      => 'Str',
@@ -36,11 +50,44 @@ has mode => (
     default  => 'menu',
 );
 
-has escape_time => (
+has esc_char => (
+    is       => 'rw',
+    isa      => 'Str',
+    required => 1,
+    default  => "\x1b",
+);
+
+has escape_timeout => (
     is       => 'rw',
     isa      => 'Num',
     required => 1,
     default  => 1.0,
+);
+
+has last_escape_time => (
+    is       => 'rw',
+    isa      => 'Num',
+    required => 1,
+    default  => 1.0,
+);
+
+has needed_esc => (    # How many esc presses to enter menu?
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+    default  => 4,
+);
+
+has received_esc => (    # How many esc presses have we received?
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+    default  => 0,
+);
+
+has esc_housekeeping => (    # Used to keep the housekeeping function alive
+    is       => 'rw',
+    required => 0,
 );
 
 has recv_nl => (
@@ -169,13 +216,6 @@ has term_prompt => (
     default  => "\x1b[1m\x1b[32mTERMNET\x1b[33m->\x1b[0m ",
 );
 
-has last_esc => (
-    is       => 'rw',
-    isa      => 'ArrayRef[Num]',
-    default  => sub { [] },
-    required => 1,
-);
-
 sub accept_input_from_lower ( $self, $lower, $data ) {
     if ( $data eq '' ) { return; }
 
@@ -183,15 +223,82 @@ sub accept_input_from_lower ( $self, $lower, $data ) {
         $self->accept_input_connected_mode( $lower, $data );
     } elsif ( $self->mode eq 'menu' ) {
         $self->accept_input_menu_mode( $lower, $data );
+    } elsif ( $self->mode eq 'conn_suspended' ) {
+        $self->accept_input_menu_mode( $lower, $data );
     } else {
         die( "unknown mode: " . $self->mode );
     }
 }
 
 sub accept_input_connected_mode ( $self, $lower, $data ) {
+    my $esc  = $self->esc_char;
+    my $tm   = $self->last_escape_time;
+    my $to   = $self->escape_timeout;
+    my $need = $self->needed_esc;
+    my $now  = time;
+
     if ( defined( $self->upper ) ) {
-        $self->upper->accept_input_from_lower( $self, $data );
+
+        # We check to see if we got just escapes and we don't have too many.
+        if ( ( $data =~ m/^${esc}+$/s ) && ( ( $self->received_esc + length($data) ) <= $need ) ) {
+            if ( $self->received_esc == 0 ) {
+                # New escape
+                # So we need to ensure we didn't receive anything within
+                # the last timeout period.
+
+                if ( ( $tm + $to ) <= $now ) {
+                    # We are within time to add our escapes
+                    $self->received_esc( length($data) );
+                    $self->last_escape_time($now);
+                    $data = '';
+                    $self->setup_esc_callback();
+                }
+            } else {
+                # We already have escapes buffered
+                # So we need to make sure that this esc is within the
+                # timeout.
+
+                if ( ( $tm + $to ) >= $now ) {
+                    # We are within time to add escapes
+                    $self->received_esc( $self->received_esc + length($data) );
+                    $self->last_escape_time($now);
+                    $data = '';
+                    $self->setup_esc_callback();
+                }
+            }
+        }
+
+        if ( $data ne '' ) {
+            if ( $self->received_esc > 0 ) {
+                $data .= $esc x $self->received_esc;
+                $self->received_esc(0);
+                $self->esc_housekeeping(undef);
+            }
+            $self->upper->accept_input_from_lower( $self, $data );
+            $self->last_escape_time($now);
+        }
     }
+}
+
+sub setup_esc_callback($self) {
+    my $cb = sub {
+        if ( $self->received_esc == $self->needed_esc ) {
+            # We have escapes!
+            $self->received_esc(0);
+            $self->mode('conn_suspended');
+            $self->send_prompt();
+            $self->esc_housekeeping(undef);
+        } else {
+            my $data = $self->esc_char x $self->received_esc;
+            $self->received_esc(0);
+            $self->last_escape_time(time);    # So we don't treat it like a new esc
+            $self->accept_input_from_upper( $self->upper, $data );
+            $self->esc_housekeeping(undef);
+        }
+    };
+
+    # Overwrite and thus blow away the old callback, if one exists.
+    $self->esc_housekeeping( AnyEvent->timer( after => 1.0, cb => $cb ) );
 }
 
 sub accept_input_menu_mode ( $self, $lower, $data ) {
@@ -230,6 +337,8 @@ sub accept_input_menu_mode ( $self, $lower, $data ) {
 
             # Do we need to prompt?
             if ( $self->mode eq 'menu' ) {
+                $self->send_prompt();
+            } elsif ( $self->mode eq 'conn_suspended' ) {
                 $self->send_prompt();
             } else {
                 $self->input_buffer($data);
@@ -300,10 +409,16 @@ sub do_command_line ( $self, $line ) {
 
     if ( $cmd eq 'activity' ) {
         $self->do_activity( \@parts );
+    } elsif ( $cmd eq 'buffer' ) {
+        $self->do_buffer( \@parts );
     } elsif ( ( $cmd eq 'c' ) || ( $cmd eq 'connect' ) ) {
         $self->do_connect( \@parts );
     } elsif ( $cmd eq 'exit' ) {
         $self->do_exit( \@parts );
+    } elsif ( $cmd eq 'hangup' ) {
+        $self->do_hangup( \@parts );
+    } elsif ( $cmd eq 'resume' ) {
+        $self->do_resume( \@parts );
     } elsif ( $cmd eq 'spew' ) {
         $self->do_spew( \@parts );
     } elsif ( $cmd eq 'list' ) {
@@ -318,11 +433,42 @@ sub do_command_line ( $self, $line ) {
 sub do_exit ( $self, $params ) {
     $self->require_params( 0, $params ) or return;
 
+    $self->esc_housekeeping(undef);
+
     $self->send_status("Goodbye");
     if ( defined( $self->upper ) ) {
         $self->upper->deregister_lower($self);
     }
     $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+}
+
+sub do_hangup ( $self, $params ) {
+    $self->require_params( 0, $params ) or return;
+    if ( $self->mode ne 'conn_suspended' ) {
+        $self->send_error("No connection is suspended!");
+        return;
+    }
+
+    $self->send_status("Disconnecting currently connected session");
+    $self->upper->accept_command_from_lower( $self, 'HANGUP' );
+    $self->upper_buffer('');
+}
+
+sub do_resume ( $self, $params ) {
+    $self->require_params( 0, $params ) or return;
+    if ( $self->mode ne 'conn_suspended' ) {
+        $self->send_error("No connection is suspended!");
+        return;
+    }
+
+    $self->send_status("Resuming suspended session");
+    $self->mode('connected');
+
+    if ( $self->upper_buffer ne '' ) {
+        my $data = $self->upper_buffer;
+        $self->upper_buffer('');
+        $self->accept_input_from_upper( $self->upper, $data );
+    }
 }
 
 sub do_spew ( $self, $params ) {
@@ -379,6 +525,19 @@ sub do_activity ( $self, $params ) {
     }
 }
 
+sub do_buffer ( $self, $params ) {
+    $self->require_params( 0, $params ) or return;
+    $self->require_upper() or return;
+
+    if ( $self->mode ne 'conn_suspended' ) {
+        $self->send_error("No connection is suspended!");
+        return;
+    }
+
+    $self->send_status("Cleared receive buffer");
+    $self->upper_buffer('');
+}
+
 sub do_connect ( $self, $params ) {
     $self->require_params( 1, $params ) or return;
     $self->require_upper() or return;
@@ -428,7 +587,11 @@ sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
 
 sub accept_input_from_upper ( $self, $upper, $data ) {
     if ( defined( $self->lower ) ) {
-        $self->lower->accept_input_from_upper( $self, $data );
+        if ( $self->mode eq 'connected' ) {
+            $self->lower->accept_input_from_upper( $self, $data );
+        } elsif ( $self->mode eq 'conn_suspended' ) {
+            $self->upper_buffer( $self->upper_buffer . $data );
+        }
     }
 }
 
@@ -436,16 +599,19 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
     if ( !defined( $self->lower ) ) { return; }
 
     if ( $cmd eq 'DISCONNECT SESSION' ) {
-        # $self->upper(undef);
+        $self->esc_housekeeping(undef);
 
-        # my $lower = $self->lower;
-        # $self->lower(undef);
-
-        # $lower->accept_command_from_upper( $self, $cmd, @data );
+        my $oldmode = $self->mode();
         $self->mode('menu');
-        $self->send_status('');
-        $self->send_status('Disconnected.');
-        $self->send_prompt();
+        if ( $oldmode eq 'connected' ) {
+            $self->send_status('');
+            $self->send_status('Disconnected from remote.');
+            $self->send_prompt();
+        } else {
+            # $self->send_status('');
+            $self->send_status('Disconnected from remote.');
+            # $self->send_prompt();
+        }
     } elsif ( $cmd eq 'OPEN SESSION' ) {
         $self->mode('connected');
         $self->send_status("Connected.");
