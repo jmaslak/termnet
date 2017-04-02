@@ -37,10 +37,10 @@ has mode => (
 );
 
 has escape_time => (
-    is => 'rw',
-    isa => 'Num',
+    is       => 'rw',
+    isa      => 'Num',
     required => 1,
-    default => 1.0,
+    default  => 1.0,
 );
 
 has recv_nl => (
@@ -72,10 +72,10 @@ has recv_ansi_del => (
 );
 
 has recv_tab => (
-    is => 'rw',
-    isa => 'Str',
+    is       => 'rw',
+    isa      => 'Str',
     required => 1,
-    default => "\t",
+    default  => "\t",
 );
 
 has send_nl => (
@@ -169,25 +169,32 @@ has term_prompt => (
     default  => "\x1b[1m\x1b[32mTERMNET\x1b[33m->\x1b[0m ",
 );
 
+has last_esc => (
+    is       => 'rw',
+    isa      => 'ArrayRef[Num]',
+    default  => sub { [] },
+    required => 1,
+);
+
 sub accept_input_from_lower ( $self, $lower, $data ) {
-    if ($data eq '') { return; }
+    if ( $data eq '' ) { return; }
 
-    if ($self->mode eq 'connected') {
-        $self->accept_input_connected_mode($lower, $data);
-    } elsif ($self->mode eq 'menu') {
-        $self->accept_input_menu_mode($lower, $data);
+    if ( $self->mode eq 'connected' ) {
+        $self->accept_input_connected_mode( $lower, $data );
+    } elsif ( $self->mode eq 'menu' ) {
+        $self->accept_input_menu_mode( $lower, $data );
     } else {
-        die("unknown mode: " . $self->mode);
+        die( "unknown mode: " . $self->mode );
     }
 }
 
-sub accept_input_connected_mode($self, $lower, $data) {
-    if (defined($self->upper)) {
-        $self->upper->accept_input_from_lower($self, $data);
+sub accept_input_connected_mode ( $self, $lower, $data ) {
+    if ( defined( $self->upper ) ) {
+        $self->upper->accept_input_from_lower( $self, $data );
     }
 }
 
-sub accept_input_menu_mode($self, $lower, $data) {
+sub accept_input_menu_mode ( $self, $lower, $data ) {
 
     # Shorter versions of common variables
     my $rbs  = $self->recv_bs;
@@ -199,15 +206,15 @@ sub accept_input_menu_mode($self, $lower, $data) {
 
     $data =~ s/${rnl}/\n/gs;
 
-    my $out = ''; # what we send out
+    my $out = '';    # what we send out
 
-    my $line = $self->input_buffer();  # Current line being input
+    my $line = $self->input_buffer();    # Current line being input
     $self->input_buffer('');
 
     my (@chars) = split '', $data;
-    while (length($data) > 0) {
+    while ( length($data) > 0 ) {
         my $c;
-        ($c, $data) = $data =~ m/^(.)(.*)$/s;
+        ( $c, $data ) = $data =~ m/^(.)(.*)$/s;
 
         if ( $c eq "\n" ) {
             # Handle newline
@@ -222,44 +229,44 @@ sub accept_input_menu_mode($self, $lower, $data) {
             $line = '';
 
             # Do we need to prompt?
-            if ($self->mode eq 'menu') {
+            if ( $self->mode eq 'menu' ) {
                 $self->send_prompt();
             } else {
                 $self->input_buffer($data);
-                $self->accept_input_from_lower( $lower, $data ); # Process command line
-                return; # We aren't in menu mode, so we return here.
+                $self->accept_input_from_lower( $lower, $data );    # Process command line
+                return;    # We aren't in menu mode, so we return here.
             }
 
         } elsif ( $c eq $rtab ) {
-            if ($line =~ m/\s/s) {
+            if ( $line =~ m/\s/s ) {
                 # Only valid on first param (the command)
                 $out .= $self->send_bell();
             } else {
                 my (@choices) = $self->completions($line);
-                if (scalar(@choices) == 0) {
+                if ( scalar(@choices) == 0 ) {
                     $out .= $self->send_bell();
-                } elsif (scalar(@choices) == 1) {
+                } elsif ( scalar(@choices) == 1 ) {
                     my $comp = $choices[0];
-                    my $l = fc($line);
+                    my $l    = fc($line);
                     $comp =~ s/^${l}//s;
 
-                    $out .= $comp . ' ';
+                    $out  .= $comp . ' ';
                     $line .= $comp . ' ';
                 } else {
                     $out .= $snl;
-                    $self->lower->accept_input_from_upper($self, $out);
+                    $self->lower->accept_input_from_upper( $self, $out );
                     $out = '';
 
                     foreach my $c (@choices) {
                         $self->send_status("    $c");
                     }
                     $self->send_prompt();
-                    $self->lower->accept_input_from_upper($self, $line);
+                    $self->lower->accept_input_from_upper( $self, $line );
                 }
             }
         } elsif ( ( $c eq $rbs ) || ( $c eq $rdel ) ) {
             # Handle backspace
-            
+
             if ( length($line) > 0 ) {
                 $line =~ s/.$//s;
                 $out .= $sbs;
@@ -276,12 +283,12 @@ sub accept_input_menu_mode($self, $lower, $data) {
     }
 
     $self->input_buffer($line);
-    if ($out ne '') {
-        $lower->accept_input_from_upper( $self, $out ); # Echo to client
+    if ( $out ne '' ) {
+        $lower->accept_input_from_upper( $self, $out );    # Echo to client
     }
 }
 
-sub do_command_line($self, $line) {
+sub do_command_line ( $self, $line ) {
     # Handle a command line
 
     # Trim front and back of line
@@ -320,7 +327,7 @@ sub do_exit ( $self, $params ) {
 
 sub do_spew ( $self, $params ) {
     $self->require_params( 1, $params ) or return;
-    $self->require_nonnegative_integer($params->[0]) or return;
+    $self->require_nonnegative_integer( $params->[0] ) or return;
 
     $self->send_noformat( "x" x $params->[0] );
 }
@@ -336,11 +343,11 @@ sub do_list ( $self, $params ) {
     my $list = $self->upper->accept_command_from_lower( $self, 'LIST NAMES' );
 
     my $maxlen = max map { length $_ } keys $list->%*;
-    foreach my $id (sort keys $list->%*) {
+    foreach my $id ( sort keys $list->%* ) {
         my $status = $list->{$id}{connection} ? 'BUSY' : 'idle';
-        my $out = sprintf("    %-${maxlen}s (%s)", $id, $status);
+        my $out = sprintf( "    %-${maxlen}s (%s)", $id, $status );
 
-        if ($status eq 'BUSY') {
+        if ( $status eq 'BUSY' ) {
             $self->send_alert($out);
         } else {
             $self->send_notice($out);
@@ -359,12 +366,12 @@ sub do_activity ( $self, $params ) {
     my $lowers = $self->upper->accept_command_from_lower( $self, 'LIST ACTIVITY' );
 
     my $maxlen = max map { length $_ } keys $lowers->%*;
-    foreach my $id (sort keys $lowers->%*) {
+    foreach my $id ( sort keys $lowers->%* ) {
         my $connection = $lowers->{$id}{connection} // 'idle';
         my $isself = ( $id eq $self->id ) ? '*' : ' ';
-        my $out = sprintf("  %s %-${maxlen}s %s", $isself, $id, $connection);
+        my $out = sprintf( "  %s %-${maxlen}s %s", $isself, $id, $connection );
 
-        if ($connection eq 'idle') {
+        if ( $connection eq 'idle' ) {
             $self->send_notice($out);
         } else {
             $self->send_alert($out);
@@ -381,7 +388,7 @@ sub do_connect ( $self, $params ) {
     $peer = fc($peer);
 
     $self->send_status("Attempting to connect...");
-    if (! $self->upper->accept_command_from_lower( $self, 'CONNECT', $peer )) {
+    if ( !$self->upper->accept_command_from_lower( $self, 'CONNECT', $peer ) ) {
         $self->send_status("Could not connect to $peer");
     }
 }
@@ -465,12 +472,13 @@ sub send_status ( $self, $status ) {
 
 sub send_noformat ( $self, $msg ) {
     if ( !defined( $self->lower ) ) { return; }
-    $self->lower->accept_input_from_upper($self, $msg);
+    $self->lower->accept_input_from_upper( $self, $msg );
 }
 
 sub send_notice ( $self, $notice ) {
     if ( !defined( $self->lower ) ) { return; }
-    my $out = $self->term_bright . $self->term_yellow . $notice . $self->term_normal . $self->send_nl;
+    my $out =
+      $self->term_bright . $self->term_yellow . $notice . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
 }
 
@@ -492,13 +500,15 @@ sub send_error ( $self, $error ) {
     $self->lower->accept_input_from_upper( $self, $out );
 }
 
-sub completions($self, $line) {
-    if ($line eq '') { return map { fc($_) } @possibilities; }
+sub completions ( $self, $line ) {
+    if ( $line eq '' ) {
+        return map { fc($_) } @possibilities;
+    }
     my $l = fc($line);
 
     my @out;
-    foreach my $c (sort map { fc($_) } @possibilities) {
-        if ($c =~ m/^${l}/s) {
+    foreach my $c ( sort map { fc($_) } @possibilities ) {
+        if ( $c =~ m/^${l}/s ) {
             push @out, $c;
         }
     }
