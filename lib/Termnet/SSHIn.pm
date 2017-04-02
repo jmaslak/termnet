@@ -10,7 +10,7 @@ package Termnet::SSHIn;
 use Termnet::Boilerplate 'class';
 
 use Bytes::Random::Secure qw(random_bytes);
-use List::Util qw(any);
+use List::Util qw(any min);
 
 # Key Exchange Algorithms
 use Termnet::SSH::KexDHSha256;
@@ -27,6 +27,9 @@ use Termnet::SSH::MacSha256;
 with 'Termnet::Lower', 'Termnet::UpperSingleChild';
 
 my $crlf = "\r\n";
+
+my $WINDOWSIZE = 2**31;    #  2 GB
+my $PACKETSIZE = 2**15;    # 32 MB
 
 my (%MSGID) = (
     SSH_MSG_DISCONNECT                => 1,
@@ -77,6 +80,14 @@ my (%DR) = (
     SSH_DISCONNECT_ILLEGAL_USER_NAME              => 15,
 );
 my (%DRNAME) = map { $DR{$_}, $_ } keys %DR;
+
+# OR = Open failure Reason
+my (%OR) = (
+    SSH_OPEN_ADMINISTRATIVELY_PROHIBITED => 1,
+    SSH_OPEN_CONNECT_FAILED              => 2,
+    SSH_OPEN_UNKNOWN_CHANNEL_TYPE        => 3,
+    SSH_OPEN_RESOURCE_SHORTAGE           => 4,
+);
 
 has type => (
     is       => 'ro',
@@ -293,6 +304,42 @@ has sign_s2c => (
     isa => 'Str',
 );
 
+has win_theirs => (
+    is  => 'rw',
+    isa => 'Int',
+);
+
+has win_ours => (
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+    default  => sub { $WINDOWSIZE },
+);
+
+has win_bytes_ours => (
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+    default  => sub { 0 },
+);
+
+has pkt_size_theirs => (
+    is  => 'rw',
+    isa => 'Int',
+);
+
+has pkt_size_ours => (
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+    default  => sub { $PACKETSIZE },
+);
+
+has channel => (
+    is  => 'rw',
+    isa => 'Int',
+);
+
 sub accept_input_from_lower ( $self, $lower, $data ) {
 
     $data = $self->lower_buffer . $data;
@@ -320,11 +367,12 @@ sub accept_input_from_upper ( $self, $upper, $data ) {
     }
 
     $data = $self->upper_buffer . $data;
-    $self->upper_buffer('');
+    $self->upper_buffer($data);
 
-    # if (defined($self->lower)) {
-    #     $self->lower->accept_input_from_upper($self, $data);
-    # }
+    if ( $self->state ne 'connected' ) { return; }
+    if ( !defined( $self->channel ) )  { return; }
+
+    $self->send_channel_data();
 }
 
 sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
@@ -342,7 +390,15 @@ sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
     }
 }
 
-after 'register_lower' => sub ( $self, $lower ) {
+around 'register_lower' => sub ( $orig, $self, $lower ) {
+    $self->$orig($lower);
+
+    ### ID: $self->id
+    my $id = $self->id;
+    $id =~ s/^[^:]+:/ssh:/s;    # Make SSH
+    $self->id($id);
+    ### ID: $self->id
+
     $self->init_negotiate();
 };
 
@@ -423,7 +479,7 @@ sub get_packet ( $self, $input ) {
     if ( length($encrypted) > ( 4 + $packet_length + $maclen ) ) {
         ### Received more than one packet
         $self->lower_buffer( substr( $encrypted, 4 + $packet_length + $maclen ) );
-        $encrypted = substr( $encrypted, 4 + $packet_length + $maclen );
+        $encrypted = substr( $encrypted, 0, 4 + $packet_length + $maclen );
     }
 
     my ($mac);
@@ -463,6 +519,7 @@ sub get_packet ( $self, $input ) {
     }
 
     my $msg_id = unpack 'C', $payload;
+    my $msgname = $MSGNAME{$msg_id} // $msg_id;
     if ( ( $msg_id >= 30 ) && ( $msg_id <= 49 ) ) {    # RFC4251 7
         if ( !defined( $self->kex ) ) {
             $self->error("Key exchange packet received before KEXINIT");
@@ -472,23 +529,39 @@ sub get_packet ( $self, $input ) {
         } else {
             $self->kex->handle_msg( $self, $payload );
         }
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_DISCONNECT' ) {
+    } elsif ( $msgname eq 'SSH_MSG_DISCONNECT' ) {
         ### Received SSH_MSG_DISCONNECT
-        $self->error("Disconnect at request of other side");
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_IGNORE' ) {
+        $self->disconnect();
+    } elsif ( $msgname eq 'SSH_MSG_IGNORE' ) {
         ### Received SSH_MSG_IGNORE
         # Ignore the message
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_KEXINIT' ) {
+    } elsif ( $msgname eq 'SSH_MSG_KEXINIT' ) {
         $self->recv_msg_kexinit($payload);
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_NEWKEYS' ) {
+    } elsif ( $msgname eq 'SSH_MSG_NEWKEYS' ) {
         $self->kex->recv_newkeys( $self, $payload );
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_SERVICE_REQUEST' ) {
+    } elsif ( $msgname eq 'SSH_MSG_SERVICE_REQUEST' ) {
         $self->recv_svc_request($payload);
-    } elsif ( ( $MSGNAME{$msg_id} // '' ) eq 'SSH_MSG_USERAUTH_REQUEST' ) {
+    } elsif ( $msgname eq 'SSH_MSG_USERAUTH_REQUEST' ) {
         $self->recv_userauth_request($payload);
+    } elsif ( $msgname eq 'SSH_MSG_GLOBAL_REQUEST' ) {
+        $self->recv_global_request($payload);
+    } elsif ( $msgname eq 'SSH_MSG_CHANNEL_OPEN' ) {
+        $self->recv_channel_open($payload);
+    } elsif ( $msgname eq 'SSH_MSG_CHANNEL_REQUEST' ) {
+        $self->recv_channel_request($payload);
+    } elsif ( $msgname eq 'SSH_MSG_CHANNEL_WINDOW_ADJUST' ) {
+        $self->recv_channel_window_adjust($payload);
+    } elsif ( $msgname eq 'SSH_MSG_CHANNEL_DATA' ) {
+        $self->recv_channel_data($payload);
     } else {
         ### Unknown Packet Type: $msg_id
         $self->send_unimplemented_packet($seq);
+    }
+
+    if ( $self->lower_buffer ne '' ) {
+        my $data = $self->lower_buffer;
+        $self->lower_buffer('');
+        $self->get_packet($data);
     }
 }
 
@@ -503,10 +576,104 @@ sub send_unimplemented_packet ( $self, $seq ) {
     $self->send_packet($pkt);
 }
 
+sub send_userauth_failure( $self ) {
+    ### Sending Message Type SSH_MSG_USERAUTH_FAILURE
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_USERAUTH_FAILURE'} );
+    $pkt .= $self->ssh_string('none');    # XXX Not RFC 4252 5.2 Compliant!
+    $pkt .= $self->ssh_uint8(0);          # Not partially successful
+    $self->send_packet($pkt);
+}
+
 sub send_userauth_success( $self ) {
-    ### Sending Message Type SSH_MSG_USERAUTH_ACCEPT
+    ### Sending Message Type SSH_MSG_USERAUTH_SUCCESS
     my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_USERAUTH_SUCCESS'} );
     $self->send_packet($pkt);
+}
+
+sub send_request_failure( $self ) {
+    ### Sending Message Type SSH_MSG_REQUEST_FAILURE
+    my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_REQUEST_FAILURE'} );
+    $self->send_packet($pkt);
+}
+
+sub send_channel_open_failure ( $self, $channel, $type ) {
+    if ( !exists( $OR{$type} ) ) {
+        $self->error('Unknown channel failure type');
+    }
+
+    my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_OPEN_FAILURE} );
+    $pkt .= $self->ssh_uint32($channel);
+    $pkt .= $self->ssh_uint32( $OR{$type} );
+    $pkt .= $self->ssh_string($type);
+    $pkt .= $self->ssh_string('en');
+
+    $self->send_packet($pkt);
+}
+
+sub send_channel_open_confirmation($self) {
+    ### Sending CHANNEL_OPEN_CONFIRMATION
+
+    my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_OPEN_CONFIRMATION} );
+    $pkt .= $self->ssh_uint32( $self->channel );
+    $pkt .= $self->ssh_uint32( $self->channel );         # We use their channel #
+    $pkt .= $self->ssh_uint32( $self->win_ours );
+    $pkt .= $self->ssh_uint32( $self->pkt_size_ours );
+
+    $self->send_packet($pkt);
+}
+
+sub send_channel_success($self) {
+    ### Sending CHANNEL_SUCCESS
+    my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_SUCCESS} );
+    $pkt .= $self->ssh_uint32( $self->channel );
+
+    $self->send_packet($pkt);
+}
+
+sub send_channel_failure($self) {
+    ### Sending CHANNEL_FAILURE
+    my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_SUCCESS} );
+    $pkt .= $self->ssh_uint32( $self->channel );
+
+    $self->send_packet($pkt);
+}
+
+sub send_channel_window_adjust ( $self, $adjust_amt ) {
+    ### Sending WINDOW_ADJUST
+    ### assert: $adjust_amt > 0
+
+    my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_WINDOW_ADJUST} );
+    $pkt .= $self->ssh_uint32( $self->channel );
+    $pkt .= $self->ssh_uint32($adjust_amt);
+
+    $self->send_packet($pkt);
+}
+
+sub send_channel_data($self) {
+    ### assert: length($self->upper_buffer) > 0
+
+    while ( ( $self->upper_buffer ne '' ) && ( $self->win_theirs > 0 ) ) {
+        ### Sending CHANNEL_DATA
+        my $data = $self->upper_buffer;
+
+        my $max_sz = min( $self->pkt_size_theirs, $self->win_theirs );
+        if ( $max_sz == 0 ) { return; }    # Can't send right now
+
+        if ( length($data) > $max_sz ) {
+            $self->upper_buffer = $self->safe_substr( $data, $max_sz );
+            $data = $self->safe_substr( $data, 0, $max_sz );
+        } else {
+            $self->upper_buffer('');
+        }
+
+        $self->win_theirs( $self->win_theirs - length($data) );
+
+        my $pkt = $self->ssh_uint8( $MSGID{SSH_MSG_CHANNEL_DATA} );
+        $pkt .= $self->ssh_uint32( $self->channel );
+        $pkt .= $self->ssh_string($data);
+
+        $self->send_packet($pkt);
+    }
 }
 
 sub send_disconnect_packet ( $self, $reason_code, $reason ) {
@@ -573,7 +740,6 @@ sub recv_msg_kexinit ( $self, $payload ) {
     $self->kexinit_client($payload);
 
     my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $payload, 0, 1 ) );
-    my $cookie = $self->safe_substr( $payload, 1, 16 );
 
     my $remainder = $self->safe_substr( $payload, 17 );
     my $kex_algorithms = $self->ssh_decode_string($remainder);
@@ -783,6 +949,8 @@ sub recv_userauth_request ( $self, $payload ) {
 
     if ( $service eq 'ssh-connection' ) {
         $self->send_userauth_success();
+    } elsif ( $method ne 'none' ) {
+        $self->send_userauth_failure();
     } else {
         $self->error(
             'Service not available',
@@ -792,7 +960,205 @@ sub recv_userauth_request ( $self, $payload ) {
     }
 }
 
+sub recv_global_request ( $self, $payload ) {
+    ### Received Message Type GLOBAL_REQUEST
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Global request seen before secure transport established");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $request_name = $self->ssh_decode_string($remainder);
+    if ( length($request_name) + 4 >= length($remainder) ) {
+        $remainder = '';
+    } else {
+        $remainder = $self->safe_substr( $remainder, 4 + length($request_name) );
+    }
+
+    ### Request Name: $request_name
+
+    $self->send_request_failure();
+}
+
+sub recv_channel_open ( $self, $payload ) {
+    ### Received Message Type CHANNEL_OPEN
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Channel open seen before secure transport established");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $channel_type = $self->ssh_decode_string($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 + length($channel_type) );
+
+    my $sender_channel = $self->ssh_decode_uint32($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 );
+
+    my $win_receive = $self->ssh_decode_uint32($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 );
+
+    my $pkt_size_theirs = $self->ssh_decode_uint32($remainder);
+    if ( 4 >= length($remainder) ) {
+        $remainder = '';
+    } else {
+        $remainder = $self->safe_substr( $remainder, 4 );
+    }
+
+    if ( $channel_type ne 'session' ) {
+        ### Unknown channel Type: $channel_type
+        $self->send_channel_open_failure( $sender_channel, 'SSH_OPEN_UNKNOWN_CHANNEL_TYPE' );
+        return;
+    }
+
+    # We know it's a session channel
+    if ( defined( $self->channel ) ) {
+        ### Attempting to open a second channel
+        $self->send_channel_open_failure( $sender_channel, 'SSH_OPEN_ADMINISTRATIVELY_PROHIBITED' );
+        return;
+    }
+
+    $self->channel($sender_channel);
+    $self->win_theirs($win_receive);
+    $self->pkt_size_theirs($pkt_size_theirs);
+
+    ### Channel Type: $channel_type
+    ### Channel Num : $self->channel
+    ### Window Size : $self->win_theirs
+    ### Packet Size : $self->pkt_size_theirs
+
+    $self->send_channel_open_confirmation();
+}
+
+sub recv_channel_request ( $self, $payload ) {
+    ### Received Message Type CHANNEL_REQUEST
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Channel request seen before secure transport established");
+    }
+
+    if ( !defined( $self->channel ) ) {
+        ### No open channel
+        $self->error("No currently open channel");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $channel = $self->ssh_decode_uint32($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 );
+
+    my $request_type = $self->ssh_decode_string($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 + length($request_type) );
+
+    my $want_reply = $self->ssh_decode_uint8($remainder);
+    if ( 1 >= length($remainder) ) {
+        $remainder = '';
+    } else {
+        $remainder = $self->safe_substr( $remainder, 4 );
+    }
+
+    if ( $self->channel != $channel ) {
+        $self->error("Channel request on wrong channel");
+    }
+
+    ### Request Type: $request_type
+
+    ### Reply desired
+    if ( $request_type eq 'shell' ) {
+        if ($want_reply) { $self->send_channel_success(); }
+
+        # We need to see if we need to send anything
+        if ( $self->upper_buffer ne '' ) {
+            $self->send_channel_data();
+        }
+    } else {
+        if ($want_reply) { $self->send_channel_failure(); }
+    }
+}
+
+sub recv_channel_window_adjust ( $self, $payload ) {
+    ### Received Message Type CHANNEL_WINDOW_ADJUST
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Channel window adjust seen before secure transport established");
+    }
+
+    if ( !defined( $self->channel ) ) {
+        ### No open channel
+        $self->error("No currently open channel");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $channel = $self->ssh_decode_uint32($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 );
+
+    my $adjust = $self->ssh_decode_uint32($remainder);
+
+    if ( $self->channel != $channel ) {
+        $self->error("Channel request on wrong channel");
+    }
+
+    ### Window Adjustment: $adjust
+
+    $self->window_theirs( $self->window_theirs + $adjust );
+    if ( $self->window_theirs >= ( 2**32 ) ) {
+        $self->error("Their window size grew too much.");
+    }
+
+    # We need to see if we need to send anything
+    if ( $self->upper_buffer ne '' ) {
+        $self->send_channel_data();
+    }
+}
+
+sub recv_channel_data ( $self, $payload ) {
+    ### Received Message Type CHANNEL_DATA
+    if ( $self->state ne 'connected' ) {
+        ### Wrong state: $self->state
+        $self->error("Channel data seen before secure transport established");
+    }
+
+    if ( !defined( $self->channel ) ) {
+        ### No open channel
+        $self->error("No currently open channel");
+    }
+
+    my $remainder = $payload;
+    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    $remainder = $self->safe_substr( $remainder, 1 );
+
+    my $channel = $self->ssh_decode_uint32($remainder);
+    $remainder = $self->safe_substr( $remainder, 4 );
+
+    my $data = $self->ssh_decode_string($remainder);
+
+    if ( $self->channel != $channel ) {
+        $self->error("Channel request on wrong channel");
+    }
+
+    # Window Management
+    $self->win_bytes_ours( $self->win_bytes_ours + length($data) );
+    if ( $self->win_bytes_ours > ( $self->win_ours / 2 ) ) {
+        $self->win_bytes_ours( $self->win_bytes_ours - ( $self->win_ours / 2 ) );
+        $self->send_channel_window_adjust( $self->win_ours / 2 );
+    }
+
+    $self->upper->accept_input_from_lower( $self, $data );
+}
+
 sub send_packet ( $self, $payload ) {
+    if ( !defined( $self->lower ) ) { return; }    # We can't send to lower if it doesn't exist
+
     my $payloadlen = length($payload);
     my $paddinglen =
       ( ( ( 5 + $payloadlen ) % $self->block_size_s2c ) == 0 )
@@ -838,6 +1204,7 @@ sub ssh_mpint ( $self, $num ) {
 }
 
 sub ssh_uint8 ( $self, $data ) {
+    if ( !defined($data) ) { $self->error('Attempt to read data that does not exist') }
     return pack( 'C', $data );
 }
 
@@ -868,9 +1235,12 @@ sub error ( $self, $error, $reason_code = undef, $reason = undef ) {
 
 sub disconnect($self) {
     if ( defined( $self->upper ) ) {
+        ### Deregistering
         $self->upper->deregister_lower($self);
     }
-    $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+    if (defined($self->lower)) {
+        $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+    }
 }
 
 sub send_raw_line ( $self, $line ) {
