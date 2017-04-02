@@ -12,7 +12,7 @@ use List::Util qw(max);
 
 with 'Termnet::Lower', 'Termnet::UpperSingleChild';
 
-my (@possibilities) = qw(activity connect exit list);
+my (@possibilities) = qw(activity connect exit list spew);
 
 has input_buffer => (
     is       => 'rw',
@@ -297,6 +297,8 @@ sub do_command_line($self, $line) {
         $self->do_connect( \@parts );
     } elsif ( $cmd eq 'exit' ) {
         $self->do_exit( \@parts );
+    } elsif ( $cmd eq 'spew' ) {
+        $self->do_spew( \@parts );
     } elsif ( $cmd eq 'list' ) {
         $self->do_list( \@parts );
     } elsif ( $cmd eq '' ) {
@@ -314,6 +316,13 @@ sub do_exit ( $self, $params ) {
         $self->upper->deregister_lower($self);
     }
     $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+}
+
+sub do_spew ( $self, $params ) {
+    $self->require_params( 1, $params ) or return;
+    $self->require_nonnegative_integer($params->[0]) or return;
+
+    $self->send_noformat( "x" x $params->[0] );
 }
 
 sub do_list ( $self, $params ) {
@@ -384,6 +393,19 @@ sub require_upper($self) {
     return undef;
 }
 
+sub require_nonnegative_integer ( $self, $param ) {
+    if ( !defined($param) ) {
+        $self->send_error("No integer provided!");
+        return undef;
+    }
+    if ( $param !~ m/^\d+$/s ) {
+        $self->send_error("Invalid non-negative integer provided!");
+        return undef;
+    }
+
+    return 1;
+}
+
 sub require_params ( $self, $count, $params ) {
     if ( $count eq scalar( $params->@* ) ) { return 1; }
 
@@ -439,6 +461,11 @@ sub send_status ( $self, $status ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_normal . $status . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+}
+
+sub send_noformat ( $self, $msg ) {
+    if ( !defined( $self->lower ) ) { return; }
+    $self->lower->accept_input_from_upper($self, $msg);
 }
 
 sub send_notice ( $self, $notice ) {
