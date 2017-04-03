@@ -736,6 +736,11 @@ sub send_svc_accept_packet ( $self, $service ) {
 
 sub recv_msg_kexinit ( $self, $payload ) {
     ### Received Message Type KEXINIT
+    
+    if ($self->state eq 'connected') {
+        # This is a rekey
+        $self->send_kexinit_packet();
+    }
 
     $self->kexinit_client($payload);
 

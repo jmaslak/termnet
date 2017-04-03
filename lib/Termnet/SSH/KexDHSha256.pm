@@ -203,7 +203,10 @@ sub send_msg_reply ( $self, $ssh ) {
       $ssh->ssh_mpint( $self->k );
     if ( !defined($hashstr) ) { $ssh->error("Problem with hash combination") }
     $self->h( sha256($hashstr) );
-    $self->session_id( $self->h );    # This is always the first H
+
+    if (!defined($self->session_id)) {
+        $self->session_id( $self->h );    # This is always the first H
+    }
 
     my $signed = $ssh->shk->sign( $ssh, $self->h );
     my $sig = $ssh->ssh_string('ssh-rsa') . $ssh->ssh_string($signed);
