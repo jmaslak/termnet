@@ -31,6 +31,10 @@ my $crlf = "\r\n";
 my $WINDOWSIZE = 2**31;    #  2 GB
 my $PACKETSIZE = 2**15;    # 32 MB
 
+if (( 1 << 32 ) != (2**32) ) {
+    die("Integers too small in this perl - integers must be > 32 bits");
+}
+
 my (%MSGID) = (
     SSH_MSG_DISCONNECT                => 1,
     SSH_MSG_IGNORE                    => 2,
@@ -502,7 +506,7 @@ sub get_packet ( $self, $input ) {
     my $padding = $padding_length ? substr( $input, 5 + $payload_length, $padding_length ) : '';
 
     my $seq = $self->recv_seq_no;
-    $self->recv_seq_no( $self->recv_seq_no + 1 );
+    $self->inc_recv_seq_no();
     if ( $maclen > 0 ) {
         my $validmac = $self->mac_c2s->digest( $seq, $input );
         if ( $validmac ne $mac ) {
@@ -919,8 +923,7 @@ sub recv_svc_request ( $self, $payload ) {
         # Foo
     } else {
         ### Unknown service request for: $service
-        ## XXX Handle wrap-around better
-        $self->send_unimplemented_packet( $self->recv_seq_no - 1 );
+        $self->send_unimplemented_packet( $self->prev_recv_seq_no() );
     }
 }
 
@@ -1181,7 +1184,7 @@ sub send_packet ( $self, $payload ) {
     my $pkt = $self->ssh_uint32($pktlen) . $payload;
 
     my $seq = $self->send_seq_no;
-    $self->send_seq_no( $self->send_seq_no + 1 );
+    $self->inc_send_seq_no();
 
     my $mac = '';
     if ( defined( $self->mac_s2c ) ) {
@@ -1271,6 +1274,21 @@ sub safe_substr ( $self, $str, $offset, $len = undef ) {
     }
 
     return substr( $str, $offset, $len );
+}
+
+sub inc_recv_seq_no($self) {
+    $self->recv_seq_no( ( $self->recv_seq_no + 1 ) % (2**32) );
+}
+
+sub inc_send_seq_no($self) {
+    $self->send_seq_no( ( $self->send_seq_no + 1 ) % (2**32) );
+}
+
+sub prev_recv_seq_no($self) {
+    my $seq = $self->recv_seq_no();
+    if ($seq < 0) { $seq = (2**32 - $seq); }
+
+    return $seq;
 }
 
 sub hexit($data) {

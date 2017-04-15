@@ -106,9 +106,7 @@ sub handle_msg ( $self, $ssh, $payload ) {
         $self->recv_msg_init( $ssh, $payload );
     } else {
         ### Receive Unknown KEX Message Type: $msg_id
-        ## XXX Note that this should be fixed so that it handles wrap
-        ##     around.
-        $ssh->send_unimplemented_packet($ssh->recv_seq_no - 1);
+        $ssh->send_unimplemented_packet($ssh->prev_recv_seq_no);
     }
 }
 
