@@ -59,6 +59,15 @@ MAIN: {
     $matrix->register_lower($serial);
     $matrix->register_name( $serial, 'sw02fpc0' );
 
+    $serial = Termnet::Serial->new(
+        port             => '/dev/ttyUSB3',
+        baud             => 115200,
+        id               => 'serial:z80',
+        del_to_backspace => 1,
+    );
+    $matrix->register_lower($serial);
+    $matrix->register_name( $serial, 'z80' );
+
     tcp_server(
         $host,
         $telnet_port,

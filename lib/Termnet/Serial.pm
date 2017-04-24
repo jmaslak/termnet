@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+    #!/usr/bin/perl
 
 #
 # Copyright (C) 2017 Joel C. Maslak
@@ -61,6 +61,9 @@ sub _build_serial($self) {
             },
         );
 
+        # We enable hardware handshaking
+        $serial->serial_port->handshake('rts');
+
         return $serial;
     } else {
         my $serial = AnyEvent::Handle->new(
@@ -110,7 +113,15 @@ has eof_cb => (
     isa => 'Maybe[CodeRef]',
 );
 
+has del_to_backspace => (
+    is       => 'rw',
+    isa      => 'Bool',
+    required => 1,
+    default  => 0,
+);
+
 sub accept_input_from_upper ( $self, $upper, $data ) {
+    if ( $self->del_to_backspace ) { $data =~ s/\x7f/\x08/gs; }
     $self->handle->push_write($data);
 }
 
