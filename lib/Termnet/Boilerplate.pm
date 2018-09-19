@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015,2016,2017 Joel C. Maslak
+# Copyright (C) 2015,2016,2017 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -12,7 +12,7 @@ package Termnet::Boilerplate;
 
 =head1 DESCRIPTION
 
-This module is a copy of JCM::Boilerplate - the following documentation
+This module is a copy of JTM::Boilerplate - the following documentation
 will refer to that module.
 
 This module serves two purposes.  First, it sets some default imports,
