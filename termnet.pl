@@ -30,7 +30,7 @@ MAIN: {
     my $serial = Termnet::Serial->new(
         port => '/dev/ttyUSB0',
         baud => 9600,
-        id   => 'serial:srx1',
+        id   => 'serial:spare',
     );
     $matrix->register_lower($serial);
     $matrix->register_name( $serial, 'srx1' );
@@ -45,7 +45,7 @@ MAIN: {
 
     $serial = Termnet::Serial->new(
         port => '/dev/ttyUSB1',
-        baud => 9600,
+        baud => 115200, 
         id   => 'serial:wlc',
     );
     $matrix->register_lower($serial);
