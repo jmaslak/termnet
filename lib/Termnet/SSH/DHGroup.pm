@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -126,7 +126,7 @@ sub get_param ( $min, $n, $max ) {
         }
     }
 
-    return undef;
+    return;
 }
 
 sub pick_next($n) {
@@ -147,8 +147,7 @@ sub update_param ( $param, $size ) {
         $param->{size} = $size;
     }
     if ( !exists( $param->{p} ) ) {
-        $param->{p} =
-          join '', map { chr(hex($_)) }
+        $param->{p} = join '', map { chr( hex($_) ) }
           split /:/,
           join '', $param->{txt}->@*;
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -31,7 +31,7 @@ my $crlf = "\r\n";
 my $WINDOWSIZE = 2**31;    #  2 GB
 my $PACKETSIZE = 2**15;    # 32 MB
 
-if (( 1 << 32 ) != (2**32) ) {
+if ( ( 1 << 32 ) != ( 2**32 ) ) {
     die("Integers too small in this perl - integers must be > 32 bits");
 }
 
@@ -178,7 +178,7 @@ sub _build_kex_avail($self) {
 
     push @kex, Termnet::SSH::KexDHSha256->new();
 
-    $self->kex_avail( \@kex );
+    return \@kex;
 }
 
 has kex => (
@@ -198,7 +198,7 @@ sub _build_server_host_key_avail($self) {
 
     push @shk, Termnet::SSH::SHKRsa->new();
 
-    $self->server_host_key_avail( \@shk );
+    return \@shk;
 }
 
 has shk => (
@@ -228,7 +228,7 @@ sub _build_cipher_avail($self) {
 
     push @cipher, Termnet::SSH::CipherAes128Ctr->new();
 
-    $self->cipher_avail( \@cipher );
+    return \@cipher;
 }
 
 has mac_avail => (
@@ -243,7 +243,7 @@ sub _build_mac_avail($self) {
 
     push @mac, Termnet::SSH::MacSha256->new();
 
-    $self->mac_avail( \@mac );
+    return \@mac;
 }
 
 has mac_c2s => (
@@ -361,6 +361,8 @@ sub accept_input_from_lower ( $self, $lower, $data ) {
         if ( $data eq '' ) { return; }
         $self->get_packet($data);
     }
+
+    return;
 }
 
 sub accept_input_from_upper ( $self, $upper, $data ) {
@@ -377,6 +379,8 @@ sub accept_input_from_upper ( $self, $upper, $data ) {
     if ( !defined( $self->channel ) )  { return; }
 
     $self->send_channel_data();
+
+    return;
 }
 
 sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
@@ -386,12 +390,16 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
         $self->upper(undef);
         $self->lower(undef);
     }
+
+    return;
 }
 
 sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
     if ( defined( $self->upper ) ) {
         $self->upper->accept_command_from_lower( $self, $cmd, @data );
     }
+
+    return;
 }
 
 around 'register_lower' => sub ( $orig, $self, $lower ) {
@@ -408,6 +416,7 @@ around 'register_lower' => sub ( $orig, $self, $lower ) {
 
 sub init_negotiate($self) {
     $self->send_raw_line( $self->v_server() );
+    return;
 }
 
 sub get_handshake ( $self, $input ) {
@@ -444,6 +453,8 @@ sub get_handshake ( $self, $input ) {
 
     $self->state('keyexchange');
     $self->send_kexinit_packet();
+
+    return;
 }
 
 sub get_packet ( $self, $input ) {
@@ -463,7 +474,7 @@ sub get_packet ( $self, $input ) {
     my $iv;
     if ( defined( $self->enc_c2s ) ) {
         # decrypt start of packet
-        $iv = $self->enc_c2s->iv;
+        $iv    = $self->enc_c2s->iv;
         $input = $self->enc_c2s->decrypt( substr( $encrypted, 0, $self->block_size_c2s ) );
     } else {
         $input = substr( $encrypted, 0, $self->block_size_c2s );
@@ -488,7 +499,7 @@ sub get_packet ( $self, $input ) {
 
     my ($mac);
     if ( $maclen > 0 ) {
-        $mac = substr( $encrypted, length($encrypted) - $maclen );
+        $mac       = substr( $encrypted, length($encrypted) - $maclen );
         $encrypted = substr( $encrypted, 0, length($encrypted) - $maclen );
     }
 
@@ -522,7 +533,7 @@ sub get_packet ( $self, $input ) {
         $self->error("Message too short to make sense (${payload_length})");
     }
 
-    my $msg_id = unpack 'C', $payload;
+    my $msg_id  = unpack 'C', $payload;
     my $msgname = $MSGNAME{$msg_id} // $msg_id;
     if ( ( $msg_id >= 30 ) && ( $msg_id <= 49 ) ) {    # RFC4251 7
         if ( !defined( $self->kex ) ) {
@@ -567,10 +578,13 @@ sub get_packet ( $self, $input ) {
         $self->lower_buffer('');
         $self->get_packet($data);
     }
+
+    return;
 }
 
 sub send_newkeys_packet($self) {
     $self->send_packet( $self->ssh_uint8( $MSGID{'SSH_MSG_NEWKEYS'} ) );
+    return;
 }
 
 sub send_unimplemented_packet ( $self, $seq ) {
@@ -578,6 +592,8 @@ sub send_unimplemented_packet ( $self, $seq ) {
     $pkt .= $self->ssh_uint32($seq);
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_userauth_failure( $self ) {
@@ -586,18 +602,24 @@ sub send_userauth_failure( $self ) {
     $pkt .= $self->ssh_string('none');    # XXX Not RFC 4252 5.2 Compliant!
     $pkt .= $self->ssh_uint8(0);          # Not partially successful
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_userauth_success( $self ) {
     ### Sending Message Type SSH_MSG_USERAUTH_SUCCESS
     my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_USERAUTH_SUCCESS'} );
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_request_failure( $self ) {
     ### Sending Message Type SSH_MSG_REQUEST_FAILURE
     my $pkt = $self->ssh_uint8( $MSGID{'SSH_MSG_REQUEST_FAILURE'} );
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_open_failure ( $self, $channel, $type ) {
@@ -612,6 +634,8 @@ sub send_channel_open_failure ( $self, $channel, $type ) {
     $pkt .= $self->ssh_string('en');
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_open_confirmation($self) {
@@ -624,6 +648,8 @@ sub send_channel_open_confirmation($self) {
     $pkt .= $self->ssh_uint32( $self->pkt_size_ours );
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_success($self) {
@@ -632,6 +658,8 @@ sub send_channel_success($self) {
     $pkt .= $self->ssh_uint32( $self->channel );
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_failure($self) {
@@ -640,6 +668,8 @@ sub send_channel_failure($self) {
     $pkt .= $self->ssh_uint32( $self->channel );
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_window_adjust ( $self, $adjust_amt ) {
@@ -651,6 +681,8 @@ sub send_channel_window_adjust ( $self, $adjust_amt ) {
     $pkt .= $self->ssh_uint32($adjust_amt);
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_channel_data($self) {
@@ -664,7 +696,7 @@ sub send_channel_data($self) {
         if ( $max_sz == 0 ) { return; }    # Can't send right now
 
         if ( length($data) > $max_sz ) {
-            $self->upper_buffer($self->safe_substr( $data, $max_sz ));
+            $self->upper_buffer( $self->safe_substr( $data, $max_sz ) );
             $data = $self->safe_substr( $data, 0, $max_sz );
         } else {
             $self->upper_buffer('');
@@ -678,6 +710,8 @@ sub send_channel_data($self) {
 
         $self->send_packet($pkt);
     }
+
+    return;
 }
 
 sub send_disconnect_packet ( $self, $reason_code, $reason ) {
@@ -694,11 +728,13 @@ sub send_disconnect_packet ( $self, $reason_code, $reason ) {
     $pkt .= $self->ssh_string('en');
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub send_kexinit_packet($self) {
     ### Sending KEXINIT
-    my $cookie = random_bytes(16);
+    my $cookie         = random_bytes(16);
     my $kex_algorithms = $self->ssh_string( join ',', map { $_->id } $self->kex_avail->@* );
 
     my $server_host_key_algorithms =
@@ -728,6 +764,8 @@ sub send_kexinit_packet($self) {
     );
     $self->send_packet($payload);
     $self->kexinit_server($payload);
+
+    return;
 }
 
 sub send_svc_accept_packet ( $self, $service ) {
@@ -736,12 +774,14 @@ sub send_svc_accept_packet ( $self, $service ) {
     $pkt .= $self->ssh_string($service);
 
     $self->send_packet($pkt);
+
+    return;
 }
 
 sub recv_msg_kexinit ( $self, $payload ) {
     ### Received Message Type KEXINIT
-    
-    if ($self->state eq 'connected') {
+
+    if ( $self->state eq 'connected' ) {
         # This is a rekey
         $self->send_kexinit_packet();
     }
@@ -750,7 +790,7 @@ sub recv_msg_kexinit ( $self, $payload ) {
 
     my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $payload, 0, 1 ) );
 
-    my $remainder = $self->safe_substr( $payload, 17 );
+    my $remainder      = $self->safe_substr( $payload, 17 );
     my $kex_algorithms = $self->ssh_decode_string($remainder);
 
     $remainder = $self->safe_substr( $remainder, length($kex_algorithms) + 4 );
@@ -782,10 +822,10 @@ sub recv_msg_kexinit ( $self, $payload ) {
 
     $remainder = $self->safe_substr( $remainder, length($lang_s2c) + 4 );
     my $kex_follows = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
-    my $future = $self->ssh_decode_uint32( $self->safe_substr( $remainder, 1, 4 ) );
+    my $future      = $self->ssh_decode_uint32( $self->safe_substr( $remainder, 1, 4 ) );
 
     # Determine KEX Algorithm
-    my (@our_kex) = $self->kex_avail->@*;
+    my (@our_kex)   = $self->kex_avail->@*;
     my (@their_kex) = split ',', $kex_algorithms, -1;
     if ( !@their_kex ) { $self->error("Remote did not send any KEX options"); }
 
@@ -813,7 +853,7 @@ sub recv_msg_kexinit ( $self, $payload ) {
     }
 
     # Determine SHK Algorithm
-    my (@our_shk) = $self->server_host_key_avail->@*;
+    my (@our_shk)   = $self->server_host_key_avail->@*;
     my (@their_shk) = split ',', $host_key, -1;
     if ( !@their_shk ) { $self->error("Remote did not send any server host key options"); }
 
@@ -830,7 +870,7 @@ sub recv_msg_kexinit ( $self, $payload ) {
     }
 
     # Determine Cipher Algorithm
-    my (@our_cipher) = $self->cipher_avail->@*;
+    my (@our_cipher)       = $self->cipher_avail->@*;
     my (@their_cipher_c2s) = split ',', $cipher_c2s, -1;
     if ( !@their_cipher_c2s ) {
         $self->error("Remote did not send any client to server cipher options");
@@ -868,7 +908,7 @@ sub recv_msg_kexinit ( $self, $payload ) {
     }
 
     # Determine MAC Algorithm
-    my (@our_mac) = $self->mac_avail->@*;
+    my (@our_mac)       = $self->mac_avail->@*;
     my (@their_mac_c2s) = split ',', $mac_c2s, -1;
     if ( !@their_mac_c2s ) { $self->error("Remote did not send any client to server MAC options"); }
 
@@ -904,6 +944,8 @@ sub recv_msg_kexinit ( $self, $payload ) {
     ### KEX Negotiate: $self->kex->id
     ### KEX Skip: $self->skip_next_key_exchange
     ### SHK Negotiate: $self->shk->id
+
+    return;
 }
 
 sub recv_svc_request ( $self, $payload ) {
@@ -913,7 +955,7 @@ sub recv_svc_request ( $self, $payload ) {
         $self->error("Service request seen before secure transport established");
     }
 
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $payload, 0, 1 ) );
+    my $msg_id  = $self->ssh_decode_uint8( $self->safe_substr( $payload, 0, 1 ) );
     my $service = $self->ssh_decode_string( $self->safe_substr( $payload, 1 ) );
 
     if ( lc($service) eq 'ssh-userauth' ) {
@@ -925,6 +967,8 @@ sub recv_svc_request ( $self, $payload ) {
         ### Unknown service request for: $service
         $self->send_unimplemented_packet( $self->prev_recv_seq_no() );
     }
+
+    return;
 }
 
 sub recv_userauth_request ( $self, $payload ) {
@@ -935,7 +979,7 @@ sub recv_userauth_request ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $user = $self->ssh_decode_string($remainder);
@@ -966,6 +1010,8 @@ sub recv_userauth_request ( $self, $payload ) {
             'Service not available'
         );
     }
+
+    return;
 }
 
 sub recv_global_request ( $self, $payload ) {
@@ -976,7 +1022,7 @@ sub recv_global_request ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $request_name = $self->ssh_decode_string($remainder);
@@ -989,6 +1035,8 @@ sub recv_global_request ( $self, $payload ) {
     ### Request Name: $request_name
 
     $self->send_request_failure();
+
+    return;
 }
 
 sub recv_channel_open ( $self, $payload ) {
@@ -999,7 +1047,7 @@ sub recv_channel_open ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $channel_type = $self->ssh_decode_string($remainder);
@@ -1041,6 +1089,8 @@ sub recv_channel_open ( $self, $payload ) {
     ### Packet Size : $self->pkt_size_theirs
 
     $self->send_channel_open_confirmation();
+
+    return;
 }
 
 sub recv_channel_request ( $self, $payload ) {
@@ -1056,7 +1106,7 @@ sub recv_channel_request ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $channel = $self->ssh_decode_uint32($remainder);
@@ -1089,6 +1139,8 @@ sub recv_channel_request ( $self, $payload ) {
     } else {
         if ($want_reply) { $self->send_channel_failure(); }
     }
+
+    return;
 }
 
 sub recv_channel_window_adjust ( $self, $payload ) {
@@ -1104,7 +1156,7 @@ sub recv_channel_window_adjust ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $channel = $self->ssh_decode_uint32($remainder);
@@ -1129,6 +1181,8 @@ sub recv_channel_window_adjust ( $self, $payload ) {
     if ( $self->upper_buffer ne '' ) {
         $self->send_channel_data();
     }
+
+    return;
 }
 
 sub recv_channel_data ( $self, $payload ) {
@@ -1144,7 +1198,7 @@ sub recv_channel_data ( $self, $payload ) {
     }
 
     my $remainder = $payload;
-    my $msg_id = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
+    my $msg_id    = $self->ssh_decode_uint8( $self->safe_substr( $remainder, 0, 1 ) );
     $remainder = $self->safe_substr( $remainder, 1 );
 
     my $channel = $self->ssh_decode_uint32($remainder);
@@ -1164,6 +1218,8 @@ sub recv_channel_data ( $self, $payload ) {
     }
 
     $self->upper->accept_input_from_lower( $self, $data );
+
+    return;
 }
 
 sub send_packet ( $self, $payload ) {
@@ -1199,6 +1255,8 @@ sub send_packet ( $self, $payload ) {
     $pkt .= $mac;
 
     $self->lower->accept_input_from_upper( $self, $pkt );
+
+    return;
 }
 
 sub ssh_string ( $self, $data ) {
@@ -1206,7 +1264,7 @@ sub ssh_string ( $self, $data ) {
 }
 
 sub ssh_mpint ( $self, $num ) {
-    my $s = Math::BigInt->from_hex( $num->to_hex )->to_bytes;
+    my $s        = Math::BigInt->from_hex( $num->to_hex )->to_bytes;
     my $firstval = ord( $self->safe_substr( $s, 0, 1 ) );
     if ( $firstval >= 128 ) { $s = chr(0) . $s; }
 
@@ -1248,13 +1306,16 @@ sub disconnect($self) {
         ### Deregistering
         $self->upper->deregister_lower($self);
     }
-    if (defined($self->lower)) {
+    if ( defined( $self->lower ) ) {
         $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
     }
+
+    return;
 }
 
 sub send_raw_line ( $self, $line ) {
     $self->lower->accept_input_from_upper( $self, "$line$crlf" );
+    return;
 }
 
 sub safe_substr ( $self, $str, $offset, $len = undef ) {
@@ -1277,16 +1338,18 @@ sub safe_substr ( $self, $str, $offset, $len = undef ) {
 }
 
 sub inc_recv_seq_no($self) {
-    $self->recv_seq_no( ( $self->recv_seq_no + 1 ) % (2**32) );
+    $self->recv_seq_no( ( $self->recv_seq_no + 1 ) % ( 2**32 ) );
+    return;
 }
 
 sub inc_send_seq_no($self) {
-    $self->send_seq_no( ( $self->send_seq_no + 1 ) % (2**32) );
+    $self->send_seq_no( ( $self->send_seq_no + 1 ) % ( 2**32 ) );
+    return;
 }
 
 sub prev_recv_seq_no($self) {
     my $seq = $self->recv_seq_no();
-    if ($seq < 0) { $seq = (2**32 - $seq); }
+    if ( $seq < 0 ) { $seq = ( 2**32 - $seq ); }
 
     return $seq;
 }

@@ -237,6 +237,8 @@ sub accept_input_from_lower ( $self, $lower, $data ) {
     } else {
         die( "unknown mode: " . $self->mode );
     }
+
+    return;
 }
 
 sub accept_input_connected_mode ( $self, $lower, $data ) {
@@ -287,6 +289,8 @@ sub accept_input_connected_mode ( $self, $lower, $data ) {
             $self->last_escape_time($now);
         }
     }
+
+    return;
 }
 
 sub setup_esc_callback($self) {
@@ -308,6 +312,8 @@ sub setup_esc_callback($self) {
 
     # Overwrite and thus blow away the old callback, if one exists.
     $self->esc_housekeeping( AnyEvent->timer( after => 1.0, cb => $cb ) );
+
+    return;
 }
 
 sub accept_input_menu_mode ( $self, $lower, $data ) {
@@ -404,6 +410,8 @@ sub accept_input_menu_mode ( $self, $lower, $data ) {
     if ( $out ne '' ) {
         $lower->accept_input_from_upper( $self, $out );    # Echo to client
     }
+
+    return;
 }
 
 sub do_command_line ( $self, $line ) {
@@ -441,6 +449,8 @@ sub do_command_line ( $self, $line ) {
     } else {
         $self->send_error("Invalid command!");
     }
+
+    return;
 }
 
 sub do_exit ( $self, $params ) {
@@ -453,6 +463,8 @@ sub do_exit ( $self, $params ) {
         $self->upper->deregister_lower($self);
     }
     $self->lower->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+
+    return;
 }
 
 sub do_hangup ( $self, $params ) {
@@ -465,6 +477,8 @@ sub do_hangup ( $self, $params ) {
     $self->send_status("Disconnecting currently connected session");
     $self->upper->accept_command_from_lower( $self, 'HANGUP' );
     $self->upper_buffer('');
+
+    return;
 }
 
 sub do_resume ( $self, $params ) {
@@ -482,6 +496,8 @@ sub do_resume ( $self, $params ) {
         $self->upper_buffer('');
         $self->accept_input_from_upper( $self->upper, $data );
     }
+
+    return;
 }
 
 sub do_spew ( $self, $params ) {
@@ -489,6 +505,8 @@ sub do_spew ( $self, $params ) {
     $self->require_nonnegative_integer( $params->[0] ) or return;
 
     $self->send_noformat( "x" x $params->[0] );
+
+    return;
 }
 
 sub do_list ( $self, $params ) {
@@ -512,6 +530,8 @@ sub do_list ( $self, $params ) {
             $self->send_notice($out);
         }
     }
+
+    return;
 }
 
 sub do_activity ( $self, $params ) {
@@ -536,6 +556,8 @@ sub do_activity ( $self, $params ) {
             $self->send_alert($out);
         }
     }
+
+    return;
 }
 
 sub do_buffer ( $self, $params ) {
@@ -549,6 +571,8 @@ sub do_buffer ( $self, $params ) {
 
     $self->send_status("Cleared receive buffer");
     $self->upper_buffer('');
+
+    return;
 }
 
 sub do_connect ( $self, $params ) {
@@ -563,23 +587,25 @@ sub do_connect ( $self, $params ) {
     if ( !$self->upper->accept_command_from_lower( $self, 'CONNECT', $peer ) ) {
         $self->send_status("Could not connect to $peer");
     }
+
+    return;
 }
 
 sub require_upper($self) {
     if ( defined( $self->upper ) ) { return 1; }
 
     $self->send_error("Error, no upper!");
-    return undef;
+    return;
 }
 
 sub require_nonnegative_integer ( $self, $param ) {
     if ( !defined($param) ) {
         $self->send_error("No integer provided!");
-        return undef;
+        return;
     }
     if ( $param !~ m/^\d+$/s ) {
         $self->send_error("Invalid non-negative integer provided!");
-        return undef;
+        return;
     }
 
     return 1;
@@ -589,7 +615,7 @@ sub require_params ( $self, $count, $params ) {
     if ( $count eq scalar( $params->@* ) ) { return 1; }
 
     $self->send_error("Incorrect parameters!");
-    return undef;
+    return;
 }
 
 sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
@@ -606,6 +632,8 @@ sub accept_input_from_upper ( $self, $upper, $data ) {
             $self->upper_buffer( $self->upper_buffer . $data );
         }
     }
+
+    return;
 }
 
 sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
@@ -632,6 +660,8 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
     } else {
         $self->lower->accept_command_from_upper( $self, $cmd, @data );
     }
+
+    return;
 }
 
 after 'register_lower' => sub ( $self, $lower ) {
@@ -641,17 +671,23 @@ after 'register_lower' => sub ( $self, $lower ) {
 sub send_prompt($self) {
     if ( !defined( $self->lower ) ) { return; }
     $self->lower->accept_input_from_upper( $self, $self->term_prompt );
+
+    return;
 }
 
 sub send_status ( $self, $status ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_normal . $status . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+
+    return;
 }
 
 sub send_noformat ( $self, $msg ) {
     if ( !defined( $self->lower ) ) { return; }
     $self->lower->accept_input_from_upper( $self, $msg );
+
+    return;
 }
 
 sub send_notice ( $self, $notice ) {
@@ -659,24 +695,32 @@ sub send_notice ( $self, $notice ) {
     my $out =
       $self->term_bright . $self->term_yellow . $notice . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+
+    return;
 }
 
 sub send_alert ( $self, $header ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_bright . $self->term_red . $header . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+
+    return;
 }
 
 sub send_header ( $self, $header ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_bright . $self->term_cyan . $header . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+
+    return;
 }
 
 sub send_error ( $self, $error ) {
     if ( !defined( $self->lower ) ) { return; }
     my $out = $self->term_error . $error . $self->term_normal . $self->send_nl;
     $self->lower->accept_input_from_upper( $self, $out );
+
+    return;
 }
 
 sub completions ( $self, $line ) {

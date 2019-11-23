@@ -1,6 +1,6 @@
 #!/usr/bin/perl 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 
 # All Rights Reserved - See License
 #
@@ -201,6 +201,8 @@ sub init_negotiate($self) {
     $self->send_do( chr(0) );      # Send DO BINARY
     $self->send_dont( chr(1) );    # Send DO GO AHEAD
     $self->send_do( chr(3) );      # Send DO SUPPRESS-GO-AHEAD
+
+    return;
 }
 
 =method put($data)
@@ -226,6 +228,8 @@ sub put ( $self, $data ) {
     $data =~ s/\xff/\xff\xff/gs;
 
     $self->writesub->($data);
+
+    return;
 }
 
 =method get()
@@ -264,7 +268,7 @@ sub get($self) {
         }
 
         # We know we have the IAC (pos 0) and command (pos 1).
-        my $cmd = substr( $part2, 1, 1 );
+        my $cmd     = substr( $part2, 1, 1 );
         my $payload = substr( $part2, 2 );
 
         if ( ord($cmd) == 255 ) {
@@ -329,14 +333,14 @@ sub ack_if_needed ( $self, $opt, $response ) {
         } else {
             $self->send_do($opt);
         }
-        return undef;
+        return;
     } elsif ( $response eq 'DONT' ) {
         if ( exists( $self->pending_do->{$optname} ) ) {
             delete( $self->pending_do->{$optname} );
         } else {
             $self->send_dont($opt);
         }
-        return undef;
+        return;
     }
 
     # Do we need to send any pending output data?
@@ -349,7 +353,7 @@ sub ack_if_needed ( $self, $opt, $response ) {
             $self->write_buffer('');
             if ( $data ne '' ) { $self->put($data) }
         }
-        return undef;
+        return;
     }
 
     # Send will/won't
@@ -360,6 +364,8 @@ sub ack_if_needed ( $self, $opt, $response ) {
     } else {
         die("Unknown response type");
     }
+
+    return;
 }
 
 =method handle_will($opt)
@@ -388,6 +394,8 @@ sub handle_will ( $self, $opt ) {
     }
 
     $self->ack_if_needed( $opt, $response );
+
+    return;
 }
 
 =method handle_wont($opt)
@@ -415,6 +423,8 @@ sub handle_wont ( $self, $opt ) {
     }
 
     $self->ack_if_needed( $opt, $response );
+
+    return;
 }
 
 =method handle_do($opt)
@@ -445,6 +455,8 @@ sub handle_do ( $self, $opt ) {
     }
 
     $self->ack_if_needed( $opt, $response );
+
+    return;
 }
 
 =method handle_dont($opt)
@@ -473,6 +485,8 @@ sub handle_dont ( $self, $opt ) {
     }
 
     $self->ack_if_needed( $opt, $response );
+
+    return;
 }
 
 =method get_opt_name($opt)
@@ -503,6 +517,8 @@ Sends a C<WILL> comamnd to the other side.
 sub send_will ( $self, $opt ) {
     #### SEND: 'WILL ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(251) . $opt );
+
+    return;
 }
 
 =method send_wont($opt)
@@ -516,6 +532,8 @@ Sends a C<WONT> comamnd to the other side.
 sub send_wont ( $self, $opt ) {
     #### SEND: 'WONT ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(252) . $opt );
+
+    return;
 }
 
 =method send_do($opt)
@@ -529,6 +547,8 @@ Sends a C<DO> comamnd to the other side.
 sub send_do ( $self, $opt ) {
     #### SEND: 'DO ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(253) . $opt );
+
+    return;
 }
 
 =method send_dont($opt)
@@ -542,6 +562,8 @@ Sends a C<DONT> comamnd to the other side.
 sub send_dont ( $self, $opt ) {
     #### SEND: 'DONT ' . $self->get_opt_name($opt)
     $self->writesub->( chr(255) . chr(254) . $opt );
+
+    return;
 }
 
 __PACKAGE__->meta->make_immutable;

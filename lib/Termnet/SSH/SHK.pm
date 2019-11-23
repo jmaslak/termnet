@@ -1,11 +1,11 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
-package Termnet::SSH::SHK; # Server Host Key
+package Termnet::SSH::SHK;    # Server Host Key
 
 use Termnet::Boilerplate 'role';
 

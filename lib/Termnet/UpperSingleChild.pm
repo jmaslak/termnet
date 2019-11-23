@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -16,7 +16,7 @@ with 'Termnet::Upper';
 has lower => (
     is      => 'rw',
     isa     => 'Maybe[Termnet::LowerObj]',
-    default => sub { return undef },
+    default => sub { return },
 );
 
 sub register_lower ( $self, $lower ) {
@@ -24,15 +24,19 @@ sub register_lower ( $self, $lower ) {
     $self->lower($lower);
     $lower->upper($self);
 
-    if ($self->DOES('Termnet::Lower')) {
-        $self->id($lower->id);
+    if ( $self->DOES('Termnet::Lower') ) {
+        $self->id( $lower->id );
     }
+
+    return;
 }
 
 sub deregister_lower ( $self, $lower ) {
     ### assert: $lower->DOES('Termnet::Lower')
     $lower->upper(undef);
     $self->lower(undef);
+
+    return;
 }
 
 1;

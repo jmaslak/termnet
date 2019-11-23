@@ -89,6 +89,7 @@ around '_build_id' => sub ( $orig, $self ) {
 
 sub accept_input_from_upper ( $self, $upper, $data ) {
     $self->handle->push_write($data);
+    return;
 }
 
 sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
@@ -103,6 +104,8 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
     } else {
         die("Unknown cmd received form upper layer: $cmd");
     }
+
+    return;
 }
 
 sub do_read ( $self, $handle ) {
@@ -113,6 +116,8 @@ sub do_read ( $self, $handle ) {
     if ( defined( $self->upper ) ) {
         $self->upper->accept_input_from_lower( $self, $data );
     }
+
+    return;
 }
 
 sub do_eof ( $self, $handle ) {
@@ -122,6 +127,8 @@ sub do_eof ( $self, $handle ) {
     if ( defined( $self->eof_cb ) ) {
         $self->eof_cb->($self);
     }
+
+    return;
 }
 
 sub do_error ( $self, $handle, $error ) {
@@ -129,6 +136,8 @@ sub do_error ( $self, $handle, $error ) {
     if ( defined( $self->upper ) ) {
         $self->upper->accept_command_from_lower( $self, 'EOF' );
     }
+
+    return;
 }
 
 __PACKAGE__->meta->make_immutable;

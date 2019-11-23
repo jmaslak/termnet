@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -84,15 +84,11 @@ has session_id => (
 );
 
 has wait_for_newkey => (
-    is => 'rw',
-    isa => 'Bool',
+    is       => 'rw',
+    isa      => 'Bool',
     required => 1,
-    default => 0,
+    default  => 0,
 );
-
-sub BUILD ( $self, @args ) {
-    state $dh;
-}
 
 sub id ($self) { return 'diffie-hellman-group-exchange-sha256'; }
 
@@ -106,14 +102,16 @@ sub handle_msg ( $self, $ssh, $payload ) {
         $self->recv_msg_init( $ssh, $payload );
     } else {
         ### Receive Unknown KEX Message Type: $msg_id
-        $ssh->send_unimplemented_packet($ssh->prev_recv_seq_no);
+        $ssh->send_unimplemented_packet( $ssh->prev_recv_seq_no );
     }
+
+    return;
 }
 
 sub recv_msg_request ( $self, $ssh, $payload ) {
     ### Received Message Type SSH_MSG_KEX_DH_GEX_REQUEST
 
-    my $msg_id = $ssh->ssh_decode_uint8( $ssh->safe_substr( $payload, 0, 1 ) );
+    my $msg_id    = $ssh->ssh_decode_uint8( $ssh->safe_substr( $payload, 0, 1 ) );
     my $remainder = $ssh->safe_substr( $payload, 1 );
 
     $self->min( $ssh->ssh_decode_uint32( $ssh->safe_substr( $remainder, 0, 4 ) ) );
@@ -126,18 +124,22 @@ sub recv_msg_request ( $self, $ssh, $payload ) {
 
     # We need to send a message to the server
     $self->send_msg_group($ssh);
+
+    return;
 }
 
 sub recv_msg_init ( $self, $ssh, $payload ) {
     ### Received Message Type SSH_MSG_KEX_DH_GEX_INIT
 
-    my $msg_id = $ssh->ssh_decode_uint8( $ssh->safe_substr( $payload, 0, 1 ) );
+    my $msg_id    = $ssh->ssh_decode_uint8( $ssh->safe_substr( $payload, 0, 1 ) );
     my $remainder = $ssh->safe_substr( $payload, 1 );
 
     $self->e( $self->binary_to_bigint( $ssh->ssh_decode_string($remainder) ) );
 
     # We need to send a message to the server
     $self->send_msg_reply($ssh);
+
+    return;
 }
 
 sub send_msg_group ( $self, $ssh ) {
@@ -161,6 +163,8 @@ sub send_msg_group ( $self, $ssh ) {
         $ssh->ssh_mpint( $self->g ),
     );
     $ssh->send_packet($payload);
+
+    return;
 }
 
 sub send_msg_reply ( $self, $ssh ) {
@@ -202,12 +206,12 @@ sub send_msg_reply ( $self, $ssh ) {
     if ( !defined($hashstr) ) { $ssh->error("Problem with hash combination") }
     $self->h( sha256($hashstr) );
 
-    if (!defined($self->session_id)) {
+    if ( !defined( $self->session_id ) ) {
         $self->session_id( $self->h );    # This is always the first H
     }
 
     my $signed = $ssh->shk->sign( $ssh, $self->h );
-    my $sig = $ssh->ssh_string('ssh-rsa') . $ssh->ssh_string($signed);
+    my $sig    = $ssh->ssh_string('ssh-rsa') . $ssh->ssh_string($signed);
 
     my $payload = join( '',
         $ssh->ssh_uint8( $MSGID{SSH_MSG_KEX_DH_GEX_REPLY} ),
@@ -237,12 +241,14 @@ sub send_msg_reply ( $self, $ssh ) {
 
     my $mac = $ssh->mac_builder_s2c->( key => $ssh->sign_s2c );
     $ssh->mac_s2c($mac);
+
+    return;
 }
 
 sub recv_newkeys ( $self, $ssh, $payload ) {
     ### Received Message Type SSH_MSG_NEWKEYS
 
-    if (! $self->wait_for_newkey) {
+    if ( !$self->wait_for_newkey ) {
         $ssh->error('Received newkeys when not expecting newkeys');
     }
     $self->wait_for_newkey(0);
@@ -260,10 +266,12 @@ sub recv_newkeys ( $self, $ssh, $payload ) {
 
     my $mac = $ssh->mac_builder_c2s->( key => $ssh->sign_c2s );
     $ssh->mac_c2s($mac);
+
+    return;
 }
 
 sub binary_to_bigint ( $self, $num ) {
-    my $n = '00' . join '', map { sprintf( "%02x", ord($_) ) } split( '', $num );
+    my $n   = '00' . join '', map { sprintf( "%02x", ord($_) ) } split( '', $num );
     my $ret = Math::BigInt->from_hex($n);
 
     return $ret;

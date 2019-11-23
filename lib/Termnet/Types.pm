@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -14,5 +14,4 @@ use Moose::Util::TypeConstraints;
 role_type 'Termnet::LowerObj' => { role => 'Termnet::Lower' };
 
 1;
-
 

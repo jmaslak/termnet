@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -23,12 +23,16 @@ sub register_lower ( $self, $lower ) {
     my $id = $lower->id;
     $self->lower->{$id} = $lower;
     $lower->upper($self);
+
+    return;
 }
 
 sub deregister_lower ( $self, $lower ) {
     my $id = $lower->id;
     $lower->upper(undef);
     delete $self->lower->{$id};
+
+    return;
 }
 
 1;

@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -26,34 +26,34 @@ has aes => (
 
 sub _build_aes($self) {
     return Crypt::OpenSSL::AES->new( $self->key() );
-};
+}
 
 sub id ($self) { return 'aes128-ctr' }
 
 sub decrypt ( $self, $msg ) {
-    if (length($msg) % 16 != 0) {
+    if ( length($msg) % 16 != 0 ) {
         die("Trying to decrypt message not neatly broken into blocks");
     }
-    my (@blocks) = unpack "a16" x (length($msg) / 16), $msg;
+    my (@blocks) = unpack "a16" x ( length($msg) / 16 ), $msg;
 
     my @out;
     foreach my $block (@blocks) {
-        push @out, $self->aes->encrypt($self->iv) ^ $block;
+        push @out, $self->aes->encrypt( $self->iv ) ^ $block;
         $self->next_iv();
     }
 
     return join '', @out;
 }
 
-sub encrypt ( $self, $msg) {
-    if (length($msg) % 16 != 0) {
+sub encrypt ( $self, $msg ) {
+    if ( length($msg) % 16 != 0 ) {
         die("Trying to encrypt message not neatly broken into blocks");
     }
-    my (@blocks) = unpack "a16" x (length($msg) / 16), $msg;
+    my (@blocks) = unpack "a16" x ( length($msg) / 16 ), $msg;
 
     my @out;
     foreach my $block (@blocks) {
-        push @out, $self->aes->encrypt($self->iv) ^ $block;
+        push @out, $self->aes->encrypt( $self->iv ) ^ $block;
         $self->next_iv();
     }
 
@@ -78,7 +78,9 @@ sub next_iv ( $self ) {
         unshift @out, $c;
     }
 
-    $self->iv(join '', @out);
+    $self->iv( join '', @out );
+
+    return;
 }
 
 sub hexit($data) {

@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -29,7 +29,7 @@ sub _build_telnet($self) {
             return $d;
         },
         writesub => sub($data) {
-            if (defined($self->lower)) {
+            if ( defined( $self->lower ) ) {
                 $self->lower->accept_input_from_upper( $self, $data );
             }
         },
@@ -58,6 +58,8 @@ sub accept_input_from_lower ( $self, $lower, $data ) {
     if ( $cleandata ne '' ) {
         $self->upper->accept_input_from_lower( $self, $cleandata );
     }
+
+    return;
 }
 
 sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
@@ -68,6 +70,7 @@ sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
 
 sub accept_input_from_upper ( $self, $upper, $data ) {
     $self->telnet->put($data);
+    return;
 }
 
 sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
@@ -77,6 +80,8 @@ sub accept_command_from_upper ( $self, $upper, $cmd, @data ) {
         $self->upper(undef);
         $self->lower(undef);
     }
+
+    return;
 }
 
 after 'register_lower' => sub ( $self, $lower ) {

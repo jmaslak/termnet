@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015,2016,2017 Joelle Maslak
+# Copyright (C) 2015-2017,2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -90,6 +90,8 @@ sub import ( $self, $type = 'script' ) {
 
     # For "switch" feature
     warnings->unimport::out_of( $target, 'experimental::smartmatch' );
+
+    return;
 }
 
 1;

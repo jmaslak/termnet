@@ -51,6 +51,8 @@ sub connect_lowers ( $self, $endpoint1, $endpoint2 ) {
 
     $self->lower->{$endpoint1}->accept_command_from_upper( $self, 'OPEN SESSION' );
     $self->lower->{$endpoint2}->accept_command_from_upper( $self, 'OPEN SESSION' );
+
+    return;
 }
 
 sub disconnect ( $self, $endpoint1 ) {
@@ -66,22 +68,24 @@ sub disconnect ( $self, $endpoint1 ) {
     $self->disconnect($endpoint2);
 
     $self->lower->{$endpoint1}->accept_command_from_upper( $self, 'DISCONNECT SESSION' );
+
+    return;
 }
 
 sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
     if ( $cmd eq 'EOF' ) {
         $self->disconnect( $lower->id );
         $self->deregister_lower($lower);
-        return undef;
+        return;
     } elsif ( $cmd eq 'LIST ACTIVITY' ) {
         return $self->get_activity();
     } elsif ( $cmd eq 'LIST NAMES' ) {
         return $self->get_names();
     } elsif ( $cmd eq 'CONNECT' ) {
         my ($peer) = @data;
-        if ( ( $peer // '' ) eq '' ) { return undef; }
-        if ( !exists( $self->names->{$peer} ) )        { return undef; }
-        if ( $lower->id eq $self->names->{$peer}{id} ) { return undef; }
+        if ( ( $peer // '' ) eq '' )                   { return; }
+        if ( !exists( $self->names->{$peer} ) )        { return; }
+        if ( $lower->id eq $self->names->{$peer}{id} ) { return; }
 
         $self->connect_lowers( $lower->id, $self->names->{$peer}{id} );
         return 1;
@@ -90,6 +94,8 @@ sub accept_command_from_lower ( $self, $lower, $cmd, @data ) {
     } else {
         die("Unknown command received from lower layer: $cmd");
     }
+
+    return;
 }
 
 sub accept_input_from_lower ( $self, $lower, $data ) {
@@ -100,12 +106,16 @@ sub accept_input_from_lower ( $self, $lower, $data ) {
     my $peer    = $self->lower->{$peer_id};
 
     $peer->accept_input_from_upper( $self, $data );
+
+    return;
 }
 
 sub register_name ( $self, $lower, $name ) {
     my $id = $lower->id;
 
     $self->names->{$name} = { id => $lower->id };
+
+    return;
 }
 
 before 'deregister_lower' => sub ( $self, $lower ) {
