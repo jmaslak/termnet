@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017-2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -33,7 +33,7 @@ MAIN: {
         id   => 'serial:spare',
     );
     $matrix->register_lower($serial);
-    $matrix->register_name( $serial, 'srx1' );
+    $matrix->register_name( $serial, 'spare' );
 
     $serial = Termnet::Serial->new(
         port => '/dev/ttyACM0',
@@ -45,7 +45,7 @@ MAIN: {
 
     $serial = Termnet::Serial->new(
         port => '/dev/ttyUSB1',
-        baud => 115200, 
+        baud => 115200,
         id   => 'serial:wlc',
     );
     $matrix->register_lower($serial);
@@ -60,13 +60,21 @@ MAIN: {
     $matrix->register_name( $serial, 'sw02fpc0' );
 
     $serial = Termnet::Serial->new(
-        port             => '/dev/ttyUSB3',
-        baud             => 115200,
-        id               => 'serial:z80',
-        del_to_backspace => 1,
+        port => '/dev/ttyUSB4',
+        baud => 9600,
+        id   => 'serial:spare2',
     );
     $matrix->register_lower($serial);
-    $matrix->register_name( $serial, 'z80' );
+    $matrix->register_name( $serial, 'spare2' );
+
+    # $serial = Termnet::Serial->new(
+    #    port             => '/dev/ttyUSB3',
+    #    baud             => 115200,
+    #    id               => 'serial:z80',
+    #    del_to_backspace => 1,
+    #);
+    #$matrix->register_lower($serial);
+    #$matrix->register_name( $serial, 'z80' );
 
     tcp_server(
         $host,
@@ -103,6 +111,20 @@ MAIN: {
             # $matrix->connect_lowers($menu->id, $serial->id);
         },
     );
+
+    # Serial input
+    $serial = Termnet::Serial->new(
+        port             => '/dev/ttyUSB3',
+        baud             => 115200,
+        id               => 'console:oob-dongle',
+        del_to_backspace => 1,
+        handshake        => 'none',
+    );
+    do {
+        my $menu = Termnet::Menu->new( allow_exit => undef );
+        $menu->register_lower($serial);
+        $matrix->register_lower($menu);
+    };
 
     $cv->recv;
 }

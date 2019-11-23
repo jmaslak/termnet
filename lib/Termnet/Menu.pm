@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017-2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -150,7 +150,8 @@ has term_bright => (
     is       => 'rw',
     isa      => 'Str',
     required => 1,
-    default  => "\x1b[1m",
+    # default  => "\x1b[1m",
+    default => "",
 );
 
 has term_green => (
@@ -213,7 +214,15 @@ has term_prompt => (
     is       => 'rw',
     isa      => 'Str',
     required => 1,
-    default  => "\x1b[1m\x1b[32mTERMNET\x1b[33m->\x1b[0m ",
+    # default  => "\x1b[1m\x1b[32mTERMNET\x1b[33m->\x1b[0m ",
+    default => "\x1b[1m\x1b[32mTERMNET\x1b[0m->\x1b[0m ",
+);
+
+has allow_exit => (
+    is       => 'rw',
+    isa      => 'Bool',
+    required => 1,
+    default  => 1,
 );
 
 sub accept_input_from_lower ( $self, $lower, $data ) {
@@ -414,7 +423,11 @@ sub do_command_line ( $self, $line ) {
     } elsif ( ( $cmd eq 'c' ) || ( $cmd eq 'connect' ) ) {
         $self->do_connect( \@parts );
     } elsif ( $cmd eq 'exit' ) {
-        $self->do_exit( \@parts );
+        if ( $self->allow_exit ) {
+            $self->do_exit( \@parts );
+        } else {
+            $self->send_error("Cannot exit menu from permanent console");
+        }
     } elsif ( $cmd eq 'hangup' ) {
         $self->do_hangup( \@parts );
     } elsif ( $cmd eq 'resume' ) {
@@ -491,7 +504,7 @@ sub do_list ( $self, $params ) {
     my $maxlen = max map { length $_ } keys $list->%*;
     foreach my $id ( sort keys $list->%* ) {
         my $status = $list->{$id}{connection} ? 'BUSY' : 'idle';
-        my $out = sprintf( "    %-${maxlen}s (%s)", $id, $status );
+        my $out    = sprintf( "    %-${maxlen}s (%s)", $id, $status );
 
         if ( $status eq 'BUSY' ) {
             $self->send_alert($out);
@@ -514,8 +527,8 @@ sub do_activity ( $self, $params ) {
     my $maxlen = max map { length $_ } keys $lowers->%*;
     foreach my $id ( sort keys $lowers->%* ) {
         my $connection = $lowers->{$id}{connection} // 'idle';
-        my $isself = ( $id eq $self->id ) ? '*' : ' ';
-        my $out = sprintf( "  %s %-${maxlen}s %s", $isself, $id, $connection );
+        my $isself     = ( $id eq $self->id ) ? '*' : ' ';
+        my $out        = sprintf( "  %s %-${maxlen}s %s", $isself, $id, $connection );
 
         if ( $connection eq 'idle' ) {
             $self->send_notice($out);

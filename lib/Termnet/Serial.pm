@@ -1,7 +1,7 @@
-    #!/usr/bin/perl
+#!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017-2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -46,11 +46,18 @@ has handle => (
     builder  => '_build_serial',
 );
 
+has handshake => (
+    is       => 'ro',
+    isa      => 'Str',
+    required => 1,
+    default  => "rts",
+);
+
 sub _build_serial($self) {
     if ( !defined $self->test_fh ) {
         my $serial = AnyEvent::SerialPort->new(
             serial_port => [ $self->port, [ baudrate => $self->baud ] ],
-            on_error => sub ( $h, $fatal, $error ) {
+            on_error    => sub ( $h, $fatal, $error ) {
                 warn $error;
             },
             on_eof => sub($h) {
@@ -62,7 +69,7 @@ sub _build_serial($self) {
         );
 
         # We enable hardware handshaking
-        $serial->serial_port->handshake('rts');
+        $serial->serial_port->handshake( $self->handshake );
 
         return $serial;
     } else {
@@ -120,6 +127,13 @@ has del_to_backspace => (
     default  => 0,
 );
 
+has use_dtr => (
+    is       => 'rw',
+    isa      => 'Bool',
+    required => 1,
+    default  => 1,
+);
+
 sub accept_input_from_upper ( $self, $upper, $data ) {
     if ( $self->del_to_backspace ) { $data =~ s/\x7f/\x08/gs; }
     $self->handle->push_write($data);
@@ -127,9 +141,19 @@ sub accept_input_from_upper ( $self, $upper, $data ) {
 
 sub accept_command_from_upper ( $self, $upper, $command, @data ) {
     if ( $command eq 'OPEN SESSION' ) {
-        $self->pulse_dtr();
+        if ( $self->use_dtr() ) {
+            $self->pulse_dtr();
+        } else {
+            $self->_delay_start(0);
+            if ( defined( $self->send_on_connect ) ) {
+                $self->handle->rbuf = '';
+                $self->handle->push_write( $self->send_on_connect );
+            }
+        }
     } elsif ( $command eq 'DISCONNECT SESSION' ) {
-        $self->handle->{serial_port}->dtr_active(0);
+        if ( $self->use_dtr() ) {
+            $self->handle->{serial_port}->dtr_active(0);
+        }
         $self->_delay_start(1);
     } else {
         die("Unknown command received from upper layer: $command");
