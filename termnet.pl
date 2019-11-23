@@ -30,10 +30,10 @@ MAIN: {
     my $serial = Termnet::Serial->new(
         port => '/dev/ttyUSB0',
         baud => 9600,
-        id   => 'serial:spare',
+        id   => 'serial:labsw01',
     );
     $matrix->register_lower($serial);
-    $matrix->register_name( $serial, 'spare' );
+    $matrix->register_name( $serial, 'labsw01' );
 
     $serial = Termnet::Serial->new(
         port => '/dev/ttyACM0',
@@ -62,10 +62,10 @@ MAIN: {
     $serial = Termnet::Serial->new(
         port => '/dev/ttyUSB4',
         baud => 9600,
-        id   => 'serial:spare2',
+        id   => 'serial:labsw02',
     );
     $matrix->register_lower($serial);
-    $matrix->register_name( $serial, 'spare2' );
+    $matrix->register_name( $serial, 'labsw02' );
 
     # $serial = Termnet::Serial->new(
     #    port             => '/dev/ttyUSB3',
@@ -80,7 +80,7 @@ MAIN: {
         $host,
         $telnet_port,
         sub ( $fh, $host, $telnet_port ) {
-            my $tcp = Termnet::TCP->new( fh => $fh, );
+            my $tcp = Termnet::TCP->new( fh => $fh, peer_host => $host, peer_port => $telnet_port );
 
             my $tn = Termnet::TelnetIn->new();
             $tn->register_lower($tcp);
@@ -98,7 +98,7 @@ MAIN: {
         $host,
         $ssh_port,
         sub ( $fh, $host, $ssh_port ) {
-            my $tcp = Termnet::TCP->new( fh => $fh, );
+            my $tcp = Termnet::TCP->new( fh => $fh, peer_host => $host, peer_port => $ssh_port );
 
             my $ssh = Termnet::SSHIn->new();
             $ssh->register_lower($tcp);

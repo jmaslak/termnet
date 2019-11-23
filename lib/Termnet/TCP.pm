@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017-2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
@@ -70,8 +70,21 @@ has eof_cb => (
     isa => 'Maybe[CodeRef]',
 );
 
-around '_build_id' => sub($orig, $self) {
-    return $self->type . ":" . $self->$orig();
+has peer_host => (
+    is       => 'rw',
+    isa      => 'Str',
+    required => 1,
+);
+
+has peer_port => (
+    is       => 'rw',
+    isa      => 'Int',
+    required => 1,
+);
+
+around '_build_id' => sub ( $orig, $self ) {
+    state $cnt = 0;
+    return $self->type . ":" . $self->peer_host . ":" . $self->peer_port . "+" . $cnt++;
 };
 
 sub accept_input_from_upper ( $self, $upper, $data ) {

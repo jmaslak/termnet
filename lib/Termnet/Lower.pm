@@ -1,13 +1,11 @@
 #!/usr/bin/perl
 
 #
-# Copyright (C) 2017 Joelle Maslak
+# Copyright (C) 2017-2019 Joelle Maslak
 # All Rights Reserved - See License
 #
 
 package Termnet::Lower;
-
-my $cnt = 0;
 
 use Termnet::Boilerplate 'role';
 
@@ -22,6 +20,8 @@ has id => (
 );
 
 sub _build_id($self) {
+    state $cnt = 0;
+
     if ( $cnt > 2_000_000_000 ) { $cnt = 0; }
     return join ':', scalar(time), rand(1_000_000), $cnt++;
 }

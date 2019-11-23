@@ -1,5 +1,5 @@
  * Better help
  * "Novice Mode" - display things like escape sequence when connecting
  * Reconfiguration from command line
- * TCP/SSH connections should indicat source address and protocol
+ * TCP/SSH connections should indicate protocol
  * Tap mode (redirect all input/output from a port)
